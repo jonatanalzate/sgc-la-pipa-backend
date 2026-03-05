@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Variables de entorno (NUNCA al repo)
+.env
+
+# Mac
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Alembic
+alembic/versions/*.pyc
+
+# IDE
+.vscode/
+.idea/
