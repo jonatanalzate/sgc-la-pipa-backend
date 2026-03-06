@@ -34,6 +34,7 @@ class AsociadoUpdate(BaseModel):
 
 class AsociadoRead(AsociadoBase):
     id_asociado: int
+    id_fondo: int | None = None
     estado: bool
     activo: bool = True
     fecha_creacion: datetime | None = None

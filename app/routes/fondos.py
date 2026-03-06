@@ -83,6 +83,22 @@ async def list_fondos(
     return fondos
 
 
+@router.get("/{id_fondo}", response_model=FondoRead)
+async def get_fondo(
+    id_fondo: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL, TIENDA_OPERADOR)),
+):
+    tenant_id = get_tenant_id(current_user)
+    result = await db.execute(select(Fondo).where(Fondo.id_fondo == id_fondo, Fondo.activo.is_(True)))
+    fondo = result.scalar_one_or_none()
+    if fondo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fondo no encontrado.")
+    if tenant_id is not None and fondo.id_fondo != tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sin acceso a este fondo.")
+    return fondo
+
+
 @router.patch("/{id_fondo}", response_model=FondoRead)
 async def update_fondo(
     id_fondo: int,

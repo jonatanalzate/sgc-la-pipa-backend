@@ -19,6 +19,7 @@ from app.routes import (
     reportes,
     dashboard,
     auditoria,
+    cartera,
 )
 
 
@@ -55,5 +56,6 @@ app.include_router(reportes.router)
 app.include_router(dashboard.router)
 app.include_router(auditoria.router)
 app.include_router(ip_whitelist.router)
+app.include_router(cartera.router)
 
 

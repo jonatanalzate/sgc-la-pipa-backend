@@ -12,4 +12,5 @@ from .venta import Venta  # noqa: F401
 from .entrega import Entrega  # noqa: F401
 from .auditoria import Auditoria  # noqa: F401
 from .ip_whitelist import IPWhitelist  # noqa: F401
+from .cartera import MovimientoCartera  # noqa: F401
 
