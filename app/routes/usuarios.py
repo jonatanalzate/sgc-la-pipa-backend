@@ -30,12 +30,25 @@ async def list_users(
 
     - Por defecto solo devuelve activo==True.
     """
-    query = select(Usuario)
+    query = select(Usuario).options(selectinload(Usuario.rol))
     if activo_only:
         query = query.where(Usuario.activo.is_(True))
     result = await db.execute(query)
-    return result.scalars().all()
-
+    usuarios = result.scalars().all()
+    return [
+        UserRead(
+            id_usuario=u.id_usuario,
+            nombre=u.nombre,
+            email=u.email,
+            id_fondo=u.id_fondo,
+            activo=u.activo,
+            fecha_creacion=u.fecha_creacion,
+            fecha_actualizacion=u.fecha_actualizacion,
+            fecha_eliminacion=u.fecha_eliminacion,
+            nombre_rol=u.rol.nombre_rol if u.rol else None,
+        )
+        for u in usuarios
+    ]
 
 @router.post("/", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
@@ -74,8 +87,23 @@ async def create_user(
     await registrar_auditoria(db, current_user, acciones.CREAR_USUARIO)
     await db.commit()
     await db.refresh(usuario)
-    return usuario
-
+    result = await db.execute(
+        select(Usuario)
+        .options(selectinload(Usuario.rol))
+        .where(Usuario.id_usuario == usuario.id_usuario)
+    )
+    usuario_con_rol = result.scalar_one()
+    return UserRead(
+        id_usuario=usuario_con_rol.id_usuario,
+        nombre=usuario_con_rol.nombre,
+        email=usuario_con_rol.email,
+        id_fondo=usuario_con_rol.id_fondo,
+        activo=usuario_con_rol.activo,
+        fecha_creacion=usuario_con_rol.fecha_creacion,
+        fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
+        fecha_eliminacion=usuario_con_rol.fecha_eliminacion,
+        nombre_rol=usuario_con_rol.rol.nombre_rol if usuario_con_rol.rol else None,
+    )
 
 @router.put("/{id_usuario}", response_model=UserRead)
 async def update_user(
@@ -118,7 +146,23 @@ async def update_user(
     await registrar_auditoria(db, current_user, acciones.ACTUALIZAR_USUARIO)
     await db.commit()
     await db.refresh(usuario)
-    return usuario
+    result = await db.execute(
+        select(Usuario)
+        .options(selectinload(Usuario.rol))
+        .where(Usuario.id_usuario == usuario.id_usuario)
+    )
+    usuario_con_rol = result.scalar_one()
+    return UserRead(
+        id_usuario=usuario_con_rol.id_usuario,
+        nombre=usuario_con_rol.nombre,
+        email=usuario_con_rol.email,
+        id_fondo=usuario_con_rol.id_fondo,
+        activo=usuario_con_rol.activo,
+        fecha_creacion=usuario_con_rol.fecha_creacion,
+        fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
+        fecha_eliminacion=usuario_con_rol.fecha_eliminacion,
+        nombre_rol=usuario_con_rol.rol.nombre_rol if usuario_con_rol.rol else None,
+    )
 
 
 @router.delete("/{id_usuario}", status_code=status.HTTP_204_NO_CONTENT)
