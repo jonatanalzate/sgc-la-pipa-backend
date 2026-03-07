@@ -35,3 +35,7 @@ class FondoRead(FondoBase):
     class Config:
         from_attributes = True
 
+class FondoCargaMasivaResult(BaseModel):
+    creados: int
+    errores: int
+    detalle_errores: list[str] = []

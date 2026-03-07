@@ -1,3 +1,8 @@
+import io
+from fastapi import File, UploadFile
+from app.schemas.fondo import FondoCreate, FondoRead, FondoUpdate, FondoCargaMasivaResult
+import pandas as pd
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -188,3 +193,69 @@ async def delete_fondo(
     await registrar_auditoria(db, current_user, acciones.ELIMINAR_FONDO)
     await db.commit()
 
+@router.post(
+    "/carga-masiva-archivo",
+    response_model=FondoCargaMasivaResult,
+    status_code=status.HTTP_200_OK,
+)
+async def carga_masiva_fondos(
+    archivo: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+):
+    contenido = await archivo.read()
+    try:
+        if archivo.filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(contenido))
+        else:
+            df = pd.read_excel(io.BytesIO(contenido))
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudo leer el archivo. Verifica el formato.",
+        )
+
+    if "nombre" not in df.columns or "nit" not in df.columns:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El archivo debe tener las columnas: nombre y nit.",
+        )
+
+    creados = 0
+    errores = 0
+    detalle_errores = []
+
+    for _, row in df.iterrows():
+        nombre = str(row["nombre"]).strip()
+        nit = str(row["nit"]).strip()
+
+        if not nombre or not nit:
+            errores += 1
+            detalle_errores.append(f"Fila vacía: nombre='{nombre}' nit='{nit}'")
+            continue
+
+        result = await db.execute(select(Fondo).where(Fondo.nit == nit))
+        if result.scalar_one_or_none() is not None:
+            errores += 1
+            detalle_errores.append(f"NIT duplicado: {nit}")
+            continue
+
+        fondo = Fondo(nombre=nombre, nit=nit, estado=True, activo=True)
+        db.add(fondo)
+        await db.flush()
+        cupo = CupoGeneral(
+            id_fondo=fondo.id_fondo,
+            valor_total=0.0,
+            valor_disponible=0.0,
+        )
+        db.add(cupo)
+        creados += 1
+
+    await registrar_auditoria(db, current_user, acciones.CREAR_FONDO)
+    await db.commit()
+
+    return FondoCargaMasivaResult(
+        creados=creados,
+        errores=errores,
+        detalle_errores=detalle_errores,
+    )
