@@ -2,21 +2,38 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auditoria import registrar_auditoria
 from app.core.dependencies import get_current_user, get_tenant_id, require_roles
 from app.core import acciones
-from app.core.roles import ADMIN_GLOBAL
+from app.core.roles import ADMIN_GLOBAL, EJECUTIVO_COMERCIAL
 from app.core.security import hash_password, verify_password
 from app.database.config import get_db
 from app.models.rol import Rol
 from app.models.usuario import Usuario
+from app.models.ejecutivo_fondos import EjecutivoFondo
 from app.schemas.user import UserCreate, UserPasswordChange, UserRead, UserUpdate
 
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
+
+
+async def _sync_fondos_ejecutivo(
+    db: AsyncSession,
+    id_usuario: int,
+    fondos_ids: list[int],
+) -> None:
+    """Reemplaza la asignación completa de fondos de un ejecutivo."""
+    await db.execute(
+        sa_delete(EjecutivoFondo).where(
+            EjecutivoFondo.id_usuario == id_usuario
+        )
+    )
+    for id_fondo in fondos_ids:
+        db.add(EjecutivoFondo(id_usuario=id_usuario, id_fondo=id_fondo))
 
 
 @router.get("/", response_model=list[UserRead])
@@ -84,6 +101,14 @@ async def create_user(
         activo=True,
     )
     db.add(usuario)
+    await db.flush()
+
+    from app.core.roles import _get_rol_name
+
+    rol_nombre = _get_rol_name(usuario)
+    if rol_nombre == EJECUTIVO_COMERCIAL and payload.fondos_asignados:
+        await _sync_fondos_ejecutivo(db, usuario.id_usuario, payload.fondos_asignados)
+
     await registrar_auditoria(db, current_user, acciones.CREAR_USUARIO)
     await db.commit()
     await db.refresh(usuario)
@@ -140,8 +165,16 @@ async def update_user(
                 detail="Ya existe otro usuario con ese email.",
             )
 
+    fondos_asignados = update_data.pop("fondos_asignados", None)
+
     for field, value in update_data.items():
         setattr(usuario, field, value)
+
+    from app.core.roles import _get_rol_name
+
+    rol_final = _get_rol_name(usuario)
+    if rol_final == EJECUTIVO_COMERCIAL and fondos_asignados is not None:
+        await _sync_fondos_ejecutivo(db, id_usuario, fondos_asignados)
 
     await registrar_auditoria(db, current_user, acciones.ACTUALIZAR_USUARIO)
     await db.commit()
