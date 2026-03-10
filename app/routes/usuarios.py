@@ -103,10 +103,8 @@ async def create_user(
     db.add(usuario)
     await db.flush()
 
-    from app.core.roles import _get_rol_name
-
-    rol_nombre = _get_rol_name(usuario)
-    if rol_nombre == EJECUTIVO_COMERCIAL and payload.fondos_asignados:
+    # id_rol == 3 corresponde a EJECUTIVO_COMERCIAL
+    if payload.id_rol == 3 and payload.fondos_asignados:
         await _sync_fondos_ejecutivo(db, usuario.id_usuario, payload.fondos_asignados)
 
     await registrar_auditoria(db, current_user, acciones.CREAR_USUARIO)
