@@ -2,6 +2,7 @@ from sqlalchemy import Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.config import Base
+from app.models.ejecutivo_fondos import EjecutivoFondo
 from app.models.mixins import TimestampMixin, SoftDeleteMixin
 
 
@@ -39,6 +40,15 @@ class Usuario(TimestampMixin, SoftDeleteMixin, Base):
         "Fondo",
         back_populates="ejecutivo",
         foreign_keys="Fondo.id_ejecutivo",
+    )
+
+    fondos_asignados: Mapped[list["Fondo"]] = relationship(
+        "Fondo",
+        secondary="ejecutivo_fondos",
+        primaryjoin="Usuario.id_usuario == foreign(EjecutivoFondo.id_usuario)",
+        secondaryjoin="Fondo.id_fondo == foreign(EjecutivoFondo.id_fondo)",
+        viewonly=False,
+        lazy="selectin",
     )
 
     ventas: Mapped[list["Venta"]] = relationship(
