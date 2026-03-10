@@ -7,7 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auditoria import registrar_auditoria
-from app.core.dependencies import get_current_user, get_tenant_id, require_roles, ensure_fondo_user
+from app.core.dependencies import (
+    get_current_user,
+    get_tenant_id,
+    get_tenant_ids,
+    require_roles,
+    ensure_fondo_user,
+)
 from app.core.roles import (
     ADMIN_FONDO,
     ADMIN_GLOBAL,
@@ -38,37 +44,24 @@ router = APIRouter(prefix="/asociados", tags=["asociados"])
 async def list_asociados(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL, TIENDA_OPERADOR)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
-    """
-    Lista de asociados:
-
-    - Admin Global: ve asociados de todos los fondos.
-    - TIENDA_OPERADOR sin id_fondo: ve asociados activos de todos los fondos (búsqueda en punto de venta).
-    - Usuario de fondo (ADMIN_FONDO, EJECUTIVO_COMERCIAL o TIENDA_OPERADOR con id_fondo):
-      solo ve los asociados de su propio fondo.
-    """
     rol = _get_rol_name(current_user)
-    tenant_id = get_tenant_id(current_user)
-
     query = select(Asociado).where(Asociado.activo.is_(True))
 
-    # ADMIN_GLOBAL nunca se filtra por fondo.
     if rol == ADMIN_GLOBAL:
-        pass
-    # TIENDA_OPERADOR:
-    # - si no tiene id_fondo (tenant_id is None) ve todos los asociados activos.
-    # - si tiene id_fondo, se restringe a su fondo.
+        pass  # sin filtro
     elif rol == TIENDA_OPERADOR:
-        if tenant_id is not None:
-            query = query.where(Asociado.id_fondo == tenant_id)
+        if tenant_ids:   # TIENDA_OPERADOR con fondo asignado
+            query = query.where(Asociado.id_fondo.in_(tenant_ids))
+        # TIENDA_OPERADOR sin fondo → ve todos (comportamiento actual preservado)
     else:
-        # Usuarios de fondo (ADMIN_FONDO, EJECUTIVO_COMERCIAL) siempre se filtran por su propio fondo.
-        if tenant_id is not None:
-            query = query.where(Asociado.id_fondo == tenant_id)
+        # ADMIN_FONDO y EJECUTIVO_COMERCIAL
+        if tenant_ids:
+            query = query.where(Asociado.id_fondo.in_(tenant_ids))
 
     result = await db.execute(query)
-    asociados = result.scalars().all()
-    return asociados
+    return result.scalars().all()
 
 
 @router.post("/", response_model=AsociadoRead, status_code=status.HTTP_201_CREATED)
@@ -108,6 +101,7 @@ async def get_asociado(
     id_asociado: int,
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL, TIENDA_OPERADOR)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     Obtiene el detalle de un asociado.
@@ -115,11 +109,9 @@ async def get_asociado(
     - Admin Global: puede ver cualquier asociado.
     - Usuario de fondo: solo asociados de su propio fondo.
     """
-    tenant_id = get_tenant_id(current_user)
-
     query = select(Asociado).where(Asociado.id_asociado == id_asociado)
-    if tenant_id is not None:
-        query = query.where(Asociado.id_fondo == tenant_id)
+    if tenant_ids:
+        query = query.where(Asociado.id_fondo.in_(tenant_ids))
 
     result = await db.execute(query)
     asociado = result.scalar_one_or_none()
@@ -137,6 +129,7 @@ async def update_asociado(
     payload: AsociadoUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     Actualización parcial de un asociado (nombre, documento, estado).
@@ -145,11 +138,9 @@ async def update_asociado(
     - Usuario de fondo: solo asociados de su propio fondo.
     - Registra en Auditoria: ASOCIADO_ACTUALIZADO.
     """
-    tenant_id = get_tenant_id(current_user)
-
     query = select(Asociado).where(Asociado.id_asociado == id_asociado)
-    if tenant_id is not None:
-        query = query.where(Asociado.id_fondo == tenant_id)
+    if tenant_ids:
+        query = query.where(Asociado.id_fondo.in_(tenant_ids))
 
     result = await db.execute(query)
     asociado = result.scalar_one_or_none()
@@ -188,6 +179,7 @@ async def delete_asociado(
     id_asociado: int,
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     Borrado lógico: cambia activo a False. No elimina el registro.
@@ -196,11 +188,9 @@ async def delete_asociado(
     - Usuario de fondo: solo asociados de su propio fondo.
     - Registra en Auditoria.
     """
-    tenant_id = get_tenant_id(current_user)
-
     query = select(Asociado).where(Asociado.id_asociado == id_asociado)
-    if tenant_id is not None:
-        query = query.where(Asociado.id_fondo == tenant_id)
+    if tenant_ids:
+        query = query.where(Asociado.id_fondo.in_(tenant_ids))
 
     result = await db.execute(query)
     asociado = result.scalar_one_or_none()
