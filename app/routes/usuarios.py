@@ -170,8 +170,9 @@ async def update_user(
 
     from app.core.roles import _get_rol_name
 
-    rol_final = _get_rol_name(usuario)
-    if rol_final == EJECUTIVO_COMERCIAL and fondos_asignados is not None:
+    # id_rol == 3 corresponde a EJECUTIVO_COMERCIAL
+    # Usamos usuario.id_rol que es un campo simple (no lazy)
+    if usuario.id_rol == 3 and fondos_asignados is not None:
         await _sync_fondos_ejecutivo(db, id_usuario, fondos_asignados)
 
     await registrar_auditoria(db, current_user, acciones.ACTUALIZAR_USUARIO)
