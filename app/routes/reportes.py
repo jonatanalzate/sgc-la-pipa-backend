@@ -7,7 +7,12 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auditoria import registrar_auditoria
-from app.core.dependencies import get_current_user, get_tenant_id, require_roles
+from app.core.dependencies import (
+    get_current_user,
+    get_tenant_id,
+    get_tenant_ids,
+    require_roles,
+)
 from app.core.roles import ADMIN_FONDO, ADMIN_GLOBAL, EJECUTIVO_COMERCIAL, _get_rol_name
 from app.database.config import get_db
 from app.models.asociado import Asociado
@@ -31,6 +36,7 @@ router = APIRouter(prefix="/reportes", tags=["reportes"])
 async def get_fondo_resumen(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     GET /reportes/fondo/resumen
@@ -41,7 +47,7 @@ async def get_fondo_resumen(
     - Monto total ejecutado (ventas).
     - Monto reservado (microcupos en estado DISPONIBLE).
     """
-    tenant_id = get_tenant_id(current_user)
+    tenant_id = tenant_ids[0] if tenant_ids else None
     if tenant_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

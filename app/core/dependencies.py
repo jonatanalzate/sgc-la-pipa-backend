@@ -98,7 +98,14 @@ async def get_tenant_ids(
             )
         return ids
 
-    # ADMIN_FONDO, TIENDA_OPERADOR
+    # TIENDA_OPERADOR sin fondo: acceso total (busca en todos los fondos)
+    # Este es el comportamiento original preservado de asociados.py
+    if rol == TIENDA_OPERADOR:
+        if current_user.id_fondo is None:
+            return []   # sin filtro → ve todos
+        return [current_user.id_fondo]
+
+    # ADMIN_FONDO: siempre requiere fondo
     if current_user.id_fondo is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
