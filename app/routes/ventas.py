@@ -5,7 +5,13 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auditoria import registrar_auditoria
-from app.core.dependencies import get_current_user, get_tenant_id, require_roles, ensure_fondo_user
+from app.core.dependencies import (
+    get_current_user,
+    get_tenant_id,
+    get_tenant_ids,
+    require_roles,
+    ensure_fondo_user,
+)
 from app.core import acciones
 from app.core.roles import (
     ADMIN_FONDO,
@@ -48,6 +54,7 @@ async def list_ventas(
     id_asociado: int | None = Query(default=None, description="Filtro por asociado"),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL, TIENDA_OPERADOR)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     Lista de ventas con filtros opcionales.
@@ -55,16 +62,14 @@ async def list_ventas(
     - Admin Global: ve todas las ventas. Si pasa id_asociado, filtra por ese asociado.
     - Usuario de fondo: solo ventas de microcupos de asociados de su fondo.
     """
-    tenant_id = get_tenant_id(current_user)
-
     query: Select[tuple] = (
         select(Venta, Asociado.nombre, Entrega.id_entrega)
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
         .outerjoin(Entrega, Venta.id_venta == Entrega.id_venta)
     )
-    if tenant_id is not None:
-        query = query.where(Asociado.id_fondo == tenant_id)
+    if tenant_ids:
+        query = query.where(Asociado.id_fondo.in_(tenant_ids))
     if id_asociado is not None:
         query = query.where(Asociado.id_asociado == id_asociado)
     if fecha_desde is not None:
@@ -87,12 +92,11 @@ async def get_venta(
     id_venta: int,
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL, TIENDA_OPERADOR)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     Detalle de una venta individual. 404 si no existe o no pertenece al fondo del usuario.
     """
-    tenant_id = get_tenant_id(current_user)
-
     query: Select[tuple] = (
         select(Venta, Asociado.nombre, Entrega.id_entrega)
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
@@ -100,8 +104,8 @@ async def get_venta(
         .outerjoin(Entrega, Venta.id_venta == Entrega.id_venta)
         .where(Venta.id_venta == id_venta)
     )
-    if tenant_id is not None:
-        query = query.where(Asociado.id_fondo == tenant_id)
+    if tenant_ids:
+        query = query.where(Asociado.id_fondo.in_(tenant_ids))
 
     result = await db.execute(query)
     row = result.one_or_none()
