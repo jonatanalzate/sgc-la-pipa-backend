@@ -43,7 +43,10 @@ async def get_current_user(
     result = await db.execute(
         select(Usuario)
         .where(Usuario.email == email)
-        .options(selectinload(Usuario.rol))
+        .options(
+            selectinload(Usuario.rol),
+            selectinload(Usuario.fondos_asignados),
+        )
     )
     user: Usuario | None = result.scalar_one_or_none()
 
@@ -64,6 +67,44 @@ def get_tenant_id(user: Usuario) -> Optional[int]:
     - Usuario de fondo: retorna su id_fondo para filtrar consultas.
     """
     return user.id_fondo
+
+
+async def get_tenant_ids(
+    current_user: Annotated[Usuario, Depends(get_current_user)],
+) -> list[int]:
+    """
+    Versión multi-fondo de get_tenant_id.
+
+    Retorna:
+      []          → ADMIN_GLOBAL (sin filtro, acceso total)
+      [id1,id2,..]→ EJECUTIVO_COMERCIAL (fondos de tabla ejecutivo_fondos)
+      [id_fondo]  → ADMIN_FONDO / TIENDA_OPERADOR (fondo único legacy)
+    """
+    rol = _get_rol_name(current_user)
+
+    if rol == ADMIN_GLOBAL:
+        return []
+
+    if rol == EJECUTIVO_COMERCIAL:
+        fondos = current_user.fondos_asignados or []
+        ids = [f.id_fondo for f in fondos if hasattr(f, "id_fondo")]
+        if not ids:
+            # fallback al campo legacy mientras se migran los datos
+            if current_user.id_fondo is not None:
+                return [current_user.id_fondo]
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="El ejecutivo no tiene fondos asignados.",
+            )
+        return ids
+
+    # ADMIN_FONDO, TIENDA_OPERADOR
+    if current_user.id_fondo is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Este recurso requiere estar asociado a un fondo.",
+        )
+    return [current_user.id_fondo]
 
 
 def require_roles(*allowed_roles: str):
