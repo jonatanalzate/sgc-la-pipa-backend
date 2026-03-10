@@ -5,7 +5,13 @@ from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auditoria import registrar_auditoria
-from app.core.dependencies import get_current_user, get_tenant_id, require_roles, ensure_fondo_user
+from app.core.dependencies import (
+    get_current_user,
+    get_tenant_id,
+    get_tenant_ids,
+    require_roles,
+    ensure_fondo_user,
+)
 from app.core import acciones
 from app.core.roles import (
     ADMIN_FONDO,
@@ -117,6 +123,7 @@ async def list_microcupos(
     current_user: Usuario = Depends(
         require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL, TIENDA_OPERADOR)
     ),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     GET /microcupos
@@ -127,7 +134,6 @@ async def list_microcupos(
       de todos los fondos (para operar en punto de venta).
     - Admin Global: ve todos los microcupos, o puede filtrar por id_fondo.
     """
-    tenant_id = get_tenant_id(current_user)
     rol = _get_rol_name(current_user)
 
     query: Select[tuple] = select(Microcupo).join(
@@ -135,18 +141,14 @@ async def list_microcupos(
     )
 
     if rol == TIENDA_OPERADOR:
-        # Siempre ve solo microcupos aprobados.
         query = query.where(Microcupo.estado == MicrocupoEstado.APROBADO)
-        # Si tiene fondo asignado, se restringe a ese fondo.
-        if tenant_id is not None:
-            query = query.where(Asociado.id_fondo == tenant_id)
+        if tenant_ids:
+            query = query.where(Asociado.id_fondo.in_(tenant_ids))
     else:
-        if tenant_id is not None:
-            # Usuario de fondo (ADMIN_FONDO, EJECUTIVO_COMERCIAL):
-            # siempre filtrado por su propio fondo.
-            query = query.where(Asociado.id_fondo == tenant_id)
+        if tenant_ids:
+            query = query.where(Asociado.id_fondo.in_(tenant_ids))
         elif id_fondo is not None:
-            # Admin Global con filtro explícito
+            # Admin Global con filtro explícito (comportamiento previo intacto)
             query = query.where(Asociado.id_fondo == id_fondo)
 
     result = await db.execute(query)
@@ -159,17 +161,16 @@ async def get_microcupo(
     id_microcupo: int,
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     Detalle de un microcupo. 404 si no existe o no pertenece al fondo del usuario.
     """
-    tenant_id = get_tenant_id(current_user)
-
     query: Select[tuple] = select(Microcupo).join(
         Asociado, Microcupo.id_asociado == Asociado.id_asociado
     ).where(Microcupo.id_microcupo == id_microcupo)
-    if tenant_id is not None:
-        query = query.where(Asociado.id_fondo == tenant_id)
+    if tenant_ids:
+        query = query.where(Asociado.id_fondo.in_(tenant_ids))
 
     result = await db.execute(query)
     microcupo = result.scalar_one_or_none()
@@ -316,19 +317,18 @@ async def update_microcupo(
     payload: MicrocupoUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
     Actualización parcial de un microcupo (fecha_vencimiento, producto_referencia, estado).
     No se puede cambiar monto ni id_asociado.
     Los estados APROBADO y DENEGADO solo se gestionan desde sus endpoints dedicados.
     """
-    tenant_id = get_tenant_id(current_user)
-
     query: Select[tuple] = select(Microcupo).join(
         Asociado, Microcupo.id_asociado == Asociado.id_asociado
     ).where(Microcupo.id_microcupo == id_microcupo)
-    if tenant_id is not None:
-        query = query.where(Asociado.id_fondo == tenant_id)
+    if tenant_ids:
+        query = query.where(Asociado.id_fondo.in_(tenant_ids))
 
     result = await db.execute(query)
     microcupo = result.scalar_one_or_none()
