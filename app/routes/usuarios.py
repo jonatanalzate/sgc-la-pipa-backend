@@ -12,6 +12,7 @@ from app.core import acciones
 from app.core.roles import ADMIN_GLOBAL, EJECUTIVO_COMERCIAL
 from app.core.security import hash_password, verify_password
 from app.database.config import get_db
+from app.models.fondo import Fondo
 from app.models.rol import Rol
 from app.models.usuario import Usuario
 from app.models.ejecutivo_fondos import EjecutivoFondo
@@ -44,10 +45,12 @@ async def list_users(
 ):
     """
     Lista usuarios. Solo Admin Global.
-
     - Por defecto solo devuelve activo==True.
     """
-    query = select(Usuario).options(selectinload(Usuario.rol))
+    query = select(Usuario).options(
+        selectinload(Usuario.rol),
+        selectinload(Usuario.fondo),
+    )
     if activo_only:
         query = query.where(Usuario.activo.is_(True))
     result = await db.execute(query)
@@ -58,6 +61,7 @@ async def list_users(
             nombre=u.nombre,
             email=u.email,
             id_fondo=u.id_fondo,
+            nombre_fondo=u.fondo.nombre if u.fondo else None,
             activo=u.activo,
             fecha_creacion=u.fecha_creacion,
             fecha_actualizacion=u.fecha_actualizacion,
@@ -67,6 +71,7 @@ async def list_users(
         for u in usuarios
     ]
 
+
 @router.post("/", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: UserCreate,
@@ -75,7 +80,6 @@ async def create_user(
 ):
     """
     Crea un nuevo usuario. Solo Admin Global.
-
     - id_fondo=None para Admin Global, o id del fondo para usuario de fondo.
     """
     result = await db.execute(select(Usuario).where(Usuario.email == payload.email))
@@ -103,7 +107,6 @@ async def create_user(
     db.add(usuario)
     await db.flush()
 
-    # id_rol == 3 corresponde a EJECUTIVO_COMERCIAL
     if payload.id_rol == 3 and payload.fondos_asignados:
         await _sync_fondos_ejecutivo(db, usuario.id_usuario, payload.fondos_asignados)
 
@@ -112,7 +115,10 @@ async def create_user(
     await db.refresh(usuario)
     result = await db.execute(
         select(Usuario)
-        .options(selectinload(Usuario.rol))
+        .options(
+            selectinload(Usuario.rol),
+            selectinload(Usuario.fondo),
+        )
         .where(Usuario.id_usuario == usuario.id_usuario)
     )
     usuario_con_rol = result.scalar_one()
@@ -121,12 +127,14 @@ async def create_user(
         nombre=usuario_con_rol.nombre,
         email=usuario_con_rol.email,
         id_fondo=usuario_con_rol.id_fondo,
+        nombre_fondo=usuario_con_rol.fondo.nombre if usuario_con_rol.fondo else None,
         activo=usuario_con_rol.activo,
         fecha_creacion=usuario_con_rol.fecha_creacion,
         fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
         fecha_eliminacion=usuario_con_rol.fecha_eliminacion,
         nombre_rol=usuario_con_rol.rol.nombre_rol if usuario_con_rol.rol else None,
     )
+
 
 @router.put("/{id_usuario}", response_model=UserRead)
 async def update_user(
@@ -135,12 +143,6 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
 ):
-    """
-    Actualiza los datos de un usuario.
-
-    - Admin Global: puede actualizar cualquier usuario.
-    - Usuario de fondo: solo su propio perfil (id_usuario == current_user.id_usuario).
-    """
     result = await db.execute(select(Usuario).where(Usuario.id_usuario == id_usuario))
     usuario = result.scalar_one_or_none()
     if usuario is None:
@@ -170,8 +172,6 @@ async def update_user(
 
     from app.core.roles import _get_rol_name
 
-    # id_rol == 3 corresponde a EJECUTIVO_COMERCIAL
-    # Usamos usuario.id_rol que es un campo simple (no lazy)
     if usuario.id_rol == 3 and fondos_asignados is not None:
         await _sync_fondos_ejecutivo(db, id_usuario, fondos_asignados)
 
@@ -180,7 +180,10 @@ async def update_user(
     await db.refresh(usuario)
     result = await db.execute(
         select(Usuario)
-        .options(selectinload(Usuario.rol))
+        .options(
+            selectinload(Usuario.rol),
+            selectinload(Usuario.fondo),
+        )
         .where(Usuario.id_usuario == usuario.id_usuario)
     )
     usuario_con_rol = result.scalar_one()
@@ -189,6 +192,7 @@ async def update_user(
         nombre=usuario_con_rol.nombre,
         email=usuario_con_rol.email,
         id_fondo=usuario_con_rol.id_fondo,
+        nombre_fondo=usuario_con_rol.fondo.nombre if usuario_con_rol.fondo else None,
         activo=usuario_con_rol.activo,
         fecha_creacion=usuario_con_rol.fecha_creacion,
         fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
@@ -203,12 +207,6 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
 ):
-    """
-    Borrado lógico: cambia activo a False. No elimina el registro.
-
-    - Solo Admin Global puede desactivar usuarios.
-    - Registra en Auditoria.
-    """
     result = await db.execute(select(Usuario).where(Usuario.id_usuario == id_usuario))
     usuario = result.scalar_one_or_none()
     if usuario is None:
@@ -236,7 +234,10 @@ async def read_users_me(
 ):
     result = await db.execute(
         select(Usuario)
-        .options(selectinload(Usuario.rol))
+        .options(
+            selectinload(Usuario.rol),
+            selectinload(Usuario.fondo),
+        )
         .where(Usuario.id_usuario == current_user.id_usuario)
     )
     user = result.scalar_one_or_none()
@@ -251,6 +252,7 @@ async def read_users_me(
         nombre=user.nombre,
         email=user.email,
         id_fondo=user.id_fondo,
+        nombre_fondo=user.fondo.nombre if user.fondo else None,
         activo=user.activo,
         fecha_creacion=user.fecha_creacion,
         fecha_actualizacion=user.fecha_actualizacion,

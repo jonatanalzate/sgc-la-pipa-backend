@@ -42,6 +42,7 @@ class UserRead(UserBase):
     fecha_actualizacion: datetime | None = None
     fecha_eliminacion: datetime | None = None
     nombre_rol: str | None = None
+    nombre_fondo: str | None = None
     fondos_asignados: list[int] = Field(default_factory=list)
 
     @classmethod
@@ -65,4 +66,3 @@ class UserRead(UserBase):
 class UserPasswordChange(BaseModel):
     current_password: str
     new_password: str
-
