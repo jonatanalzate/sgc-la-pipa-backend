@@ -1,14 +1,13 @@
 from decimal import Decimal
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class AdminDashboardStats(BaseModel):
     """
     Métricas globales para el Admin Global.
     """
-
     total_fondos_activos: int
     total_cupo_general: Decimal
     total_ventas: Decimal
@@ -25,13 +24,47 @@ class ProductoMasVendido(BaseModel):
 
 class FondoDashboardStats(BaseModel):
     """
-    Métricas detalladas para un fondo específico.
+    Métricas detalladas para un fondo o conjunto de fondos.
+    id_fondo es None cuando el ejecutivo tiene múltiples fondos.
     """
-
-    id_fondo: int
-    porcentaje_ejecucion_cupo: float  # (Suma Venta.valor_total / CupoGeneral.valor_total) * 100
-    porcentaje_compromiso_cupo: float  # ((Ventas + Microcupos DISPONIBLE) / CupoGeneral.valor_total) * 100
+    id_fondo: int | None
+    porcentaje_ejecucion_cupo: float
+    porcentaje_compromiso_cupo: float
     microcupos_vencidos: int
     microcupos_consumidos: int
     top_productos: list[ProductoMasVendido]
 
+
+class VentaRecienteItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_venta: int
+    valor_total: float
+    fecha: datetime
+    producto_detalle: str | None
+    nombre_asociado: str
+
+
+class MicrocupoRecienteItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id_microcupo: int
+    monto: float
+    estado: str
+    fecha_creacion: datetime
+    nombre_asociado: str
+
+
+class ActividadRecienteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ultimas_ventas: list[VentaRecienteItem]
+    ultimos_microcupos: list[MicrocupoRecienteItem]
+
+
+class TopAsociadoItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    nombre_asociado: str
+    cantidad_ventas: int
+    monto_total: float

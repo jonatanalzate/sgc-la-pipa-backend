@@ -4,7 +4,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import (
     get_current_user,
-    get_tenant_id,
     get_tenant_ids,
     require_roles,
 )
@@ -17,9 +16,13 @@ from app.models.microcupo import Microcupo, MicrocupoEstado
 from app.models.usuario import Usuario
 from app.models.venta import Venta
 from app.schemas.dashboard import (
+    ActividadRecienteResponse,
     AdminDashboardStats,
     FondoDashboardStats,
+    MicrocupoRecienteItem,
     ProductoMasVendido,
+    TopAsociadoItem,
+    VentaRecienteItem,
 )
 
 
@@ -35,10 +38,9 @@ async def get_admin_stats(
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
 ):
     """
-    GET /dashboard/admin/stats - Resumen global. Solo ADMIN_GLOBAL.
+    GET /dashboard/admin/estadisticas - Resumen global. Solo ADMIN_GLOBAL.
     """
 
-    # Total de fondos activos
     fondos_activos_query: Select[tuple] = select(func.count(Fondo.id_fondo)).where(
         Fondo.estado.is_(True),
         Fondo.activo == True,
@@ -46,21 +48,18 @@ async def get_admin_stats(
     fondos_activos_result = await db.execute(fondos_activos_query)
     total_fondos_activos: int = fondos_activos_result.scalar_one()
 
-    # Suma total de todos los CupoGeneral.valor_total
     total_cupo_query: Select[tuple] = select(
         func.coalesce(func.sum(CupoGeneral.valor_total), 0)
     )
     total_cupo_result = await db.execute(total_cupo_query)
     total_cupo_general = total_cupo_result.scalar_one()
 
-    # Suma total de todas las ventas realizadas en el sistema
     total_ventas_query: Select[tuple] = select(
         func.coalesce(func.sum(Venta.valor_total), 0)
     )
     total_ventas_result = await db.execute(total_ventas_query)
     total_ventas = total_ventas_result.scalar_one()
 
-    # Fondo con más ventas realizadas (por monto)
     fondo_top_query: Select[tuple] = (
         select(
             Fondo.id_fondo,
@@ -68,21 +67,9 @@ async def get_admin_stats(
             func.coalesce(func.sum(Venta.valor_total), 0).label("monto_total"),
         )
         .join(CupoGeneral, CupoGeneral.id_fondo == Fondo.id_fondo)
-        .join(
-            Asociado,
-            Asociado.id_fondo == Fondo.id_fondo,
-            isouter=True,
-        )
-        .join(
-            Microcupo,
-            Microcupo.id_asociado == Asociado.id_asociado,
-            isouter=True,
-        )
-        .join(
-            Venta,
-            Venta.id_microcupo == Microcupo.id_microcupo,
-            isouter=True,
-        )
+        .join(Asociado, Asociado.id_fondo == Fondo.id_fondo, isouter=True)
+        .join(Microcupo, Microcupo.id_asociado == Asociado.id_asociado, isouter=True)
+        .join(Venta, Venta.id_microcupo == Microcupo.id_microcupo, isouter=True)
         .where(Fondo.estado.is_(True))
         .group_by(Fondo.id_fondo, Fondo.nombre)
         .order_by(func.coalesce(func.sum(Venta.valor_total), 0).desc())
@@ -120,66 +107,71 @@ async def get_fondo_stats(
     tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
     """
-    GET /dashboard/fondo/stats - Dashboard financiero del fondo.
-    ADMIN_FONDO, EJECUTIVO_COMERCIAL. No TIENDA_OPERADOR.
+    GET /dashboard/fondo/estadisticas
+    ADMIN_FONDO: datos de su único fondo.
+    EJECUTIVO_COMERCIAL: datos consolidados de todos sus fondos.
     """
-    tenant_id = tenant_ids[0] if tenant_ids else None
-    if tenant_id is None:
+    if not tenant_ids:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo usuarios de fondo pueden acceder a las estadísticas de fondo.",
         )
 
-    # Obtener cupo general del fondo
-    cupo_query: Select[tuple] = select(CupoGeneral).where(
-        CupoGeneral.id_fondo == tenant_id
-    )
+    # Para el response: None si son múltiples fondos, id si es uno solo
+    id_fondo_response = tenant_ids[0] if len(tenant_ids) == 1 else None
+
+    # Cupo total consolidado de todos los fondos del usuario
+    cupo_query: Select[tuple] = select(
+        func.coalesce(func.sum(CupoGeneral.valor_total), 0)
+    ).where(CupoGeneral.id_fondo.in_(tenant_ids))
     cupo_result = await db.execute(cupo_query)
-    cupo = cupo_result.scalar_one_or_none()
+    valor_total_consolidado = float(cupo_result.scalar_one())
 
-    valor_total_fondo = cupo.valor_total if cupo is not None else 0
+    # Valor disponible consolidado
+    disponible_query: Select[tuple] = select(
+        func.coalesce(func.sum(CupoGeneral.valor_disponible), 0)
+    ).where(CupoGeneral.id_fondo.in_(tenant_ids))
+    disponible_result = await db.execute(disponible_query)
+    valor_disponible_consolidado = float(disponible_result.scalar_one())
 
-    if cupo is None or valor_total_fondo == 0:
+    if valor_total_consolidado == 0:
         porcentaje_ejecucion = 0.0
         porcentaje_compromiso = 0.0
     else:
-        # Monto ejecutado (ventas del fondo): Suma Venta.valor_total
+        # Monto ejecutado consolidado
         ejecutado_query: Select[tuple] = (
             select(func.coalesce(func.sum(Venta.valor_total), 0))
             .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
             .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
-            .where(Asociado.id_fondo == tenant_id)
+            .where(Asociado.id_fondo.in_(tenant_ids))
         )
         ejecutado_result = await db.execute(ejecutado_query)
-        monto_ejecutado = ejecutado_result.scalar_one()
+        monto_ejecutado = float(ejecutado_result.scalar_one())
 
-        # Monto reservado: Suma Microcupo.monto en estado APROBADO (reservado sin venta)
+        # Monto reservado consolidado (microcupos APROBADO)
         reservado_query: Select[tuple] = (
             select(func.coalesce(func.sum(Microcupo.monto), 0))
             .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
             .where(
-                Asociado.id_fondo == tenant_id,
+                Asociado.id_fondo.in_(tenant_ids),
                 Microcupo.estado == MicrocupoEstado.APROBADO,
             )
         )
         reservado_result = await db.execute(reservado_query)
-        monto_reservado = reservado_result.scalar_one()
+        monto_reservado = float(reservado_result.scalar_one())
 
-        # Porcentaje Ejecución (Ventas Reales): dinero que ya se transformó en ventas
-        porcentaje_ejecucion = float(monto_ejecutado / valor_total_fondo * 100)
+        # % ejecución en tiempo real: dinero que ya no está disponible
+        dinero_no_disponible = valor_total_consolidado - valor_disponible_consolidado
+        porcentaje_ejecucion = dinero_no_disponible / valor_total_consolidado * 100
 
-        # Porcentaje Compromiso (Dinero Bloqueado): ventas + microcupos reservados
-        monto_bloqueado = monto_ejecutado + monto_reservado
-        porcentaje_compromiso = float(monto_bloqueado / valor_total_fondo * 100)
+        # % compromiso: ejecutado + reservado
+        porcentaje_compromiso = (monto_ejecutado + monto_reservado) / valor_total_consolidado * 100
 
-    # Microcupos vencidos y consumidos
+    # Microcupos vencidos y consumidos consolidados
     microcupos_estado_query: Select[tuple] = (
-        select(
-            Microcupo.estado,
-            func.count(Microcupo.id_microcupo),
-        )
+        select(Microcupo.estado, func.count(Microcupo.id_microcupo))
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
-        .where(Asociado.id_fondo == tenant_id)
+        .where(Asociado.id_fondo.in_(tenant_ids))
         .group_by(Microcupo.estado)
     )
     microcupos_estado_result = await db.execute(microcupos_estado_query)
@@ -192,7 +184,7 @@ async def get_fondo_stats(
         elif estado == MicrocupoEstado.CONSUMIDO:
             microcupos_consumidos = cantidad
 
-    # Ranking de los 5 productos más vendidos
+    # Top 5 productos consolidados
     top_productos_query: Select[tuple] = (
         select(
             Venta.producto_detalle,
@@ -202,7 +194,7 @@ async def get_fondo_stats(
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
         .where(
-            Asociado.id_fondo == tenant_id,
+            Asociado.id_fondo.in_(tenant_ids),
             Venta.producto_detalle.is_not(None),
         )
         .group_by(Venta.producto_detalle)
@@ -210,20 +202,18 @@ async def get_fondo_stats(
         .limit(5)
     )
     top_productos_result = await db.execute(top_productos_query)
-    top_productos_rows = top_productos_result.all()
 
-    top_productos: list[ProductoMasVendido] = []
-    for producto, cantidad_ventas, monto_total in top_productos_rows:
-        top_productos.append(
-            ProductoMasVendido(
-                producto=producto,
-                cantidad_ventas=cantidad_ventas,
-                monto_total=monto_total,
-            )
+    top_productos: list[ProductoMasVendido] = [
+        ProductoMasVendido(
+            producto=row[0],
+            cantidad_ventas=row[1],
+            monto_total=row[2],
         )
+        for row in top_productos_result.all()
+    ]
 
     return FondoDashboardStats(
-        id_fondo=tenant_id,
+        id_fondo=id_fondo_response,
         porcentaje_ejecucion_cupo=porcentaje_ejecucion,
         porcentaje_compromiso_cupo=porcentaje_compromiso,
         microcupos_vencidos=microcupos_vencidos,
@@ -231,3 +221,124 @@ async def get_fondo_stats(
         top_productos=top_productos,
     )
 
+
+@router.get(
+    "/fondo/actividad-reciente",
+    response_model=ActividadRecienteResponse,
+)
+async def get_fondo_actividad_reciente(
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
+):
+    """
+    GET /dashboard/fondo/actividad-reciente
+    Últimas ventas y microcupos — consolidado para todos los fondos del usuario.
+    """
+    if not tenant_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo usuarios de fondo pueden acceder a la actividad reciente.",
+        )
+
+    ultimas_ventas_query: Select[tuple] = (
+        select(
+            Venta.id_venta,
+            Venta.valor_total,
+            Venta.fecha,
+            Venta.producto_detalle,
+            Asociado.nombre.label("nombre_asociado"),
+        )
+        .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
+        .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
+        .where(Asociado.id_fondo.in_(tenant_ids))
+        .order_by(Venta.fecha.desc())
+        .limit(5)
+    )
+    ultimas_ventas_result = await db.execute(ultimas_ventas_query)
+
+    ultimas_ventas = [
+        VentaRecienteItem(
+            id_venta=row[0],
+            valor_total=float(row[1]) if row[1] is not None else 0.0,
+            fecha=row[2],
+            producto_detalle=row[3],
+            nombre_asociado=row[4],
+        )
+        for row in ultimas_ventas_result.all()
+    ]
+
+    ultimos_microcupos_query: Select[tuple] = (
+        select(
+            Microcupo.id_microcupo,
+            Microcupo.monto,
+            Microcupo.estado,
+            Microcupo.fecha_creacion,
+            Asociado.nombre.label("nombre_asociado"),
+        )
+        .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
+        .where(Asociado.id_fondo.in_(tenant_ids))
+        .order_by(Microcupo.fecha_creacion.desc())
+        .limit(5)
+    )
+    ultimos_microcupos_result = await db.execute(ultimos_microcupos_query)
+
+    ultimos_microcupos = [
+        MicrocupoRecienteItem(
+            id_microcupo=row[0],
+            monto=float(row[1]) if row[1] is not None else 0.0,
+            estado=row[2].value if row[2] is not None else "",
+            fecha_creacion=row[3],
+            nombre_asociado=row[4],
+        )
+        for row in ultimos_microcupos_result.all()
+    ]
+
+    return ActividadRecienteResponse(
+        ultimas_ventas=ultimas_ventas,
+        ultimos_microcupos=ultimos_microcupos,
+    )
+
+
+@router.get(
+    "/fondo/top-asociados",
+    response_model=list[TopAsociadoItem],
+)
+async def get_fondo_top_asociados(
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
+):
+    """
+    GET /dashboard/fondo/top-asociados
+    Top 5 asociados por monto — consolidado para todos los fondos del usuario.
+    """
+    if not tenant_ids:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo usuarios de fondo pueden acceder al ranking de asociados.",
+        )
+
+    top_asociados_query: Select[tuple] = (
+        select(
+            Asociado.nombre.label("nombre_asociado"),
+            func.count(Venta.id_venta).label("cantidad_ventas"),
+            func.coalesce(func.sum(Venta.valor_total), 0).label("monto_total"),
+        )
+        .join(Microcupo, Microcupo.id_asociado == Asociado.id_asociado)
+        .join(Venta, Venta.id_microcupo == Microcupo.id_microcupo)
+        .where(Asociado.id_fondo.in_(tenant_ids))
+        .group_by(Asociado.id_asociado, Asociado.nombre)
+        .order_by(func.coalesce(func.sum(Venta.valor_total), 0).desc())
+        .limit(5)
+    )
+    top_asociados_result = await db.execute(top_asociados_query)
+
+    return [
+        TopAsociadoItem(
+            nombre_asociado=row[0],
+            cantidad_ventas=row[1],
+            monto_total=float(row[2]) if row[2] is not None else 0.0,
+        )
+        for row in top_asociados_result.all()
+    ]
