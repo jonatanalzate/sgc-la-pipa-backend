@@ -46,12 +46,6 @@ async def _build_cupo_estado(
     id_fondo: int,
     cupo: CupoGeneral,
 ) -> CupoEstadoRead:
-    """
-    Calcula los saldos reservados y ejecutados para un fondo y devuelve
-    un esquema de estado consolidado.
-    """
-
-    # Suma de microcupos activos (APROBADO) del fondo
     reserved_query: Select[tuple] = (
         select(func.coalesce(func.sum(Microcupo.monto), 0))
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
@@ -63,7 +57,6 @@ async def _build_cupo_estado(
     reserved_result = await db.execute(reserved_query)
     saldo_reservado = reserved_result.scalar_one()
 
-    # Suma de ventas asociadas a microcupos del fondo
     executed_query: Select[tuple] = (
         select(func.coalesce(func.sum(Venta.valor_total), 0))
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
@@ -134,7 +127,9 @@ async def _build_fondo_resumen_financiero(
         porcentaje_ejecucion = 0.0
         porcentaje_compromiso = 0.0
     else:
-        porcentaje_ejecucion = float(saldo_ejecutado / valor_total * 100)
+        # % ejecución en tiempo real: refleja abonos y pagos al instante
+        porcentaje_ejecucion = float((valor_total - valor_disponible) / valor_total * 100)
+        # % compromiso: dinero ejecutado + reservado sobre el total
         porcentaje_compromiso = float((saldo_ejecutado + saldo_reservado) / valor_total * 100)
 
     return FondoResumenFinanciero(
@@ -163,9 +158,6 @@ async def get_fondos_resumen(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
 ):
-    """
-    GET /cupos/fondos/resumen - Lista todos los fondos con estado financiero. Solo ADMIN_GLOBAL.
-    """
     result = await db.execute(
         select(Fondo).where(Fondo.activo.is_(True)).order_by(Fondo.nombre.asc())
     )
@@ -191,10 +183,6 @@ async def get_cupo_fondo_me(
     current_user: Usuario = Depends(require_roles(ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
     tenant_ids: list[int] = Depends(get_tenant_ids),
 ):
-    """
-    GET /cupos/fondos/mi-fondo - Estado financiero del cupo.
-    ADMIN_FONDO, EJECUTIVO_COMERCIAL (requiere id_fondo). No TIENDA_OPERADOR.
-    """
     tenant_id = tenant_ids[0] if tenant_ids else None
     if tenant_id is None:
         raise HTTPException(
@@ -215,10 +203,6 @@ async def get_fondo_detalle(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
 ):
-    """
-    GET /cupos/fondos/{id_fondo} - Detalle financiero de un fondo.
-    Admin Global: cualquier fondo. Usuario de fondo: solo su propio fondo.
-    """
     tenant_id = get_tenant_id(current_user)
     if tenant_id is not None and tenant_id != id_fondo:
         raise HTTPException(
@@ -249,11 +233,6 @@ async def recargar_cupo_fondo(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
 ):
-    """
-    PATCH /cupos/fondos/{id_fondo}/recargar
-    Solo ADMIN_GLOBAL. Aumenta valor_total y valor_disponible del cupo.
-    """
-
     cupo = await _get_cupo_general_for_fondo(db, id_fondo)
 
     cupo.valor_total += payload.valor_recarga
@@ -264,4 +243,3 @@ async def recargar_cupo_fondo(
     await db.refresh(cupo)
 
     return await _build_cupo_estado(db, id_fondo, cupo)
-
