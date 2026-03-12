@@ -50,7 +50,10 @@ async def list_entregas(
     if fecha_desde is not None:
         query = query.where(Entrega.fecha_entrega >= fecha_desde)
     if fecha_hasta is not None:
-        query = query.where(Entrega.fecha_entrega <= fecha_hasta)
+        fecha_hasta_fin = fecha_hasta.replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
+        query = query.where(Entrega.fecha_entrega <= fecha_hasta_fin)
 
     query = query.order_by(Entrega.fecha_entrega.desc())
     result = await db.execute(query)

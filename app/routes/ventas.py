@@ -75,7 +75,10 @@ async def list_ventas(
     if fecha_desde is not None:
         query = query.where(Venta.fecha >= fecha_desde)
     if fecha_hasta is not None:
-        query = query.where(Venta.fecha <= fecha_hasta)
+        fecha_hasta_fin = fecha_hasta.replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
+        query = query.where(Venta.fecha <= fecha_hasta_fin)
 
     query = query.order_by(Venta.fecha.desc())
     result = await db.execute(query)

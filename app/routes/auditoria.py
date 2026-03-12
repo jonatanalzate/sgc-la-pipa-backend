@@ -73,7 +73,10 @@ async def get_auditoria_logs(
     if fecha_desde is not None:
         conditions.append(Auditoria.fecha >= fecha_desde)
     if fecha_hasta is not None:
-        conditions.append(Auditoria.fecha <= fecha_hasta)
+        fecha_hasta_fin = fecha_hasta.replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
+        conditions.append(Auditoria.fecha <= fecha_hasta_fin)
 
     if conditions:
         query = query.where(and_(*conditions))
