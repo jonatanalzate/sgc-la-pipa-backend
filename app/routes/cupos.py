@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -232,13 +232,15 @@ async def recargar_cupo_fondo(
     payload: CupoRecarga,
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+    modo: str = Query(default="recargar", description="Modo de operación: asignar o recargar"),
 ):
     cupo = await _get_cupo_general_for_fondo(db, id_fondo)
 
     cupo.valor_total += payload.valor_recarga
     cupo.valor_disponible += payload.valor_recarga
 
-    await registrar_auditoria(db, current_user, acciones.RECARGAR_CUPO)
+    accion = acciones.ASIGNAR_CUPO if modo == "asignar" else acciones.RECARGAR_CUPO
+    await registrar_auditoria(db, current_user, accion)
     await db.commit()
     await db.refresh(cupo)
 
