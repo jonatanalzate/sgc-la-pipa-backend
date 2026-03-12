@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import date, datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,10 +37,15 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 async def get_admin_stats(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+    fecha: date | None = Query(default=None, description="Fecha del día a consultar. Por defecto hoy."),
 ):
     """
     GET /dashboard/admin/estadisticas - Resumen global. Solo ADMIN_GLOBAL.
+    Las métricas de ventas se filtran por el día indicado (por defecto hoy).
     """
+    dia = fecha if fecha is not None else date.today()
+    dia_inicio = datetime(dia.year, dia.month, dia.day, 0, 0, 0, tzinfo=timezone.utc)
+    dia_fin = datetime(dia.year, dia.month, dia.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
 
     fondos_activos_query: Select[tuple] = select(func.count(Fondo.id_fondo)).where(
         Fondo.estado.is_(True),
@@ -56,6 +62,9 @@ async def get_admin_stats(
 
     total_ventas_query: Select[tuple] = select(
         func.coalesce(func.sum(Venta.valor_total), 0)
+    ).where(
+        Venta.fecha >= dia_inicio,
+        Venta.fecha <= dia_fin,
     )
     total_ventas_result = await db.execute(total_ventas_query)
     total_ventas = total_ventas_result.scalar_one()
@@ -70,7 +79,11 @@ async def get_admin_stats(
         .join(Asociado, Asociado.id_fondo == Fondo.id_fondo, isouter=True)
         .join(Microcupo, Microcupo.id_asociado == Asociado.id_asociado, isouter=True)
         .join(Venta, Venta.id_microcupo == Microcupo.id_microcupo, isouter=True)
-        .where(Fondo.estado.is_(True))
+        .where(
+            Fondo.estado.is_(True),
+            Venta.fecha >= dia_inicio,
+            Venta.fecha <= dia_fin,
+        )
         .group_by(Fondo.id_fondo, Fondo.nombre)
         .order_by(func.coalesce(func.sum(Venta.valor_total), 0).desc())
         .limit(1)
