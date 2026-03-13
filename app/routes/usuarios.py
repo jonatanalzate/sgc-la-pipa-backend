@@ -50,6 +50,7 @@ async def list_users(
     query = select(Usuario).options(
         selectinload(Usuario.rol),
         selectinload(Usuario.fondo),
+        selectinload(Usuario.fondos_asignados),
     )
     if activo_only:
         query = query.where(Usuario.activo.is_(True))
@@ -67,6 +68,7 @@ async def list_users(
             fecha_actualizacion=u.fecha_actualizacion,
             fecha_eliminacion=u.fecha_eliminacion,
             nombre_rol=u.rol.nombre_rol if u.rol else None,
+            fondos_asignados=[f.id_fondo for f in u.fondos_asignados] if u.fondos_asignados else [],
         )
         for u in usuarios
     ]
