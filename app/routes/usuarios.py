@@ -239,6 +239,7 @@ async def read_users_me(
         .options(
             selectinload(Usuario.rol),
             selectinload(Usuario.fondo),
+            selectinload(Usuario.fondos_asignados),
         )
         .where(Usuario.id_usuario == current_user.id_usuario)
     )
@@ -260,6 +261,7 @@ async def read_users_me(
         fecha_actualizacion=user.fecha_actualizacion,
         fecha_eliminacion=user.fecha_eliminacion,
         nombre_rol=user.rol.nombre_rol if user.rol else None,
+        fondos_asignados=[f.id_fondo for f in user.fondos_asignados] if user.fondos_asignados else [],
     )
 
 
