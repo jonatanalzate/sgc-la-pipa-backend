@@ -46,6 +46,7 @@ class CupoEstadoRead(BaseModel):
     """
 
     id_fondo: int
+    nombre_fondo: str = ""
     valor_total: Decimal
     valor_disponible: Decimal
     saldo_reservado: Decimal

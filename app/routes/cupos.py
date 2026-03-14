@@ -66,8 +66,15 @@ async def _build_cupo_estado(
     executed_result = await db.execute(executed_query)
     saldo_ejecutado = executed_result.scalar_one()
 
+    result_fondo = await db.execute(
+        select(Fondo).where(Fondo.id_fondo == id_fondo)
+    )
+    fondo_obj = result_fondo.scalar_one_or_none()
+    nombre_fondo = fondo_obj.nombre if fondo_obj else ""
+
     return CupoEstadoRead(
         id_fondo=id_fondo,
+        nombre_fondo=nombre_fondo,
         valor_total=cupo.valor_total,
         valor_disponible=cupo.valor_disponible,
         saldo_reservado=saldo_reservado,
