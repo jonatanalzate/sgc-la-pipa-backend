@@ -43,7 +43,7 @@ class UserRead(UserBase):
     fecha_eliminacion: datetime | None = None
     nombre_rol: str | None = None
     nombre_fondo: str | None = None
-    fondos_asignados: list[int] = Field(default_factory=list)
+    fondos_asignados: list[dict] = Field(default_factory=list)
 
     @classmethod
     def model_validate(cls, obj, *, strict=None, from_attributes=None, context=None):
@@ -56,7 +56,10 @@ class UserRead(UserBase):
         if hasattr(obj, "fondos_asignados") and obj.fondos_asignados:
             primera = obj.fondos_asignados[0]
             if hasattr(primera, "id_fondo"):
-                instance.fondos_asignados = [f.id_fondo for f in obj.fondos_asignados]
+                instance.fondos_asignados = [
+                    {"id_fondo": f.id_fondo, "nombre_fondo": f.nombre}
+                    for f in obj.fondos_asignados
+                ]
         return instance
 
     class Config:

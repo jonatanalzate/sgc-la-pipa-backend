@@ -68,7 +68,7 @@ async def list_users(
             fecha_actualizacion=u.fecha_actualizacion,
             fecha_eliminacion=u.fecha_eliminacion,
             nombre_rol=u.rol.nombre_rol if u.rol else None,
-            fondos_asignados=[f.id_fondo for f in u.fondos_asignados] if u.fondos_asignados else [],
+            fondos_asignados=[{"id_fondo": f.id_fondo, "nombre_fondo": f.nombre} for f in u.fondos_asignados] if u.fondos_asignados else [],
         )
         for u in usuarios
     ]
@@ -261,7 +261,7 @@ async def read_users_me(
         fecha_actualizacion=user.fecha_actualizacion,
         fecha_eliminacion=user.fecha_eliminacion,
         nombre_rol=user.rol.nombre_rol if user.rol else None,
-        fondos_asignados=[f.id_fondo for f in user.fondos_asignados] if user.fondos_asignados else [],
+        fondos_asignados=[{"id_fondo": f.id_fondo, "nombre_fondo": f.nombre} for f in user.fondos_asignados] if user.fondos_asignados else [],
     )
 
 
