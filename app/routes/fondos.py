@@ -6,7 +6,7 @@ import pandas as pd
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,6 +17,8 @@ from app.core import acciones
 from app.database.config import get_db
 from app.models.cupo_general import CupoGeneral
 from app.models.fondo import Fondo
+from app.models.microcupo import Microcupo, MicrocupoEstado
+from app.models.venta import Venta
 from app.models.usuario import Usuario
 from app.schemas.fondo import FondoCreate, FondoRead, FondoUpdate
 
@@ -188,6 +190,42 @@ async def delete_fondo(
             detail="El fondo ya está desactivado.",
         )
 
+    # Verificar microcupos activos (APROBADO)
+    result_microcupos = await db.execute(
+        select(Microcupo).where(
+            Microcupo.id_fondo == id_fondo,
+            Microcupo.estado == MicrocupoEstado.APROBADO,
+        )
+    )
+    microcupos_activos = result_microcupos.scalars().all()
+    if microcupos_activos:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"No se puede desactivar el fondo. Tiene {len(microcupos_activos)} crédito(s) vigente(s).",
+        )
+
+    # Verificar deuda pendiente: saldo_ejecutado > 0 significa ventas sin abonar
+    result_cupo = await db.execute(
+        select(CupoGeneral).where(CupoGeneral.id_fondo == id_fondo)
+    )
+    cupo = result_cupo.scalar_one_or_none()
+    if cupo is not None:
+        saldo_ejecutado = await db.execute(
+            select(func.coalesce(func.sum(Venta.valor_total), 0)).where(
+                Venta.id_microcupo.in_(
+                    select(Microcupo.id_microcupo).where(
+                        Microcupo.id_fondo == id_fondo
+                    )
+                )
+            )
+        )
+        deuda = saldo_ejecutado.scalar() or 0
+        if deuda > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"No se puede desactivar el fondo. Tiene deuda pendiente de ${deuda:,.0f}.",
+            )
+
     fondo.activo = False
     fondo.fecha_eliminacion = datetime.now(timezone.utc)
     await registrar_auditoria(db, current_user, acciones.ELIMINAR_FONDO)
@@ -206,7 +244,7 @@ async def carga_masiva_fondos(
     contenido = await archivo.read()
     try:
         if archivo.filename.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(contenido))
+            df = pd.read_csv(io.BytesIO(contenido), sep=None, engine="python")
         else:
             df = pd.read_excel(io.BytesIO(contenido))
     except Exception:

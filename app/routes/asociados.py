@@ -296,7 +296,7 @@ async def bulk_upload_asociados(
         if filename.endswith(".xlsx"):
             df = pd.read_excel(io.BytesIO(content), engine="openpyxl")
         else:
-            df = pd.read_csv(io.BytesIO(content), encoding="utf-8", on_bad_lines="skip")
+            df = pd.read_csv(io.BytesIO(content), encoding="utf-8", on_bad_lines="skip", sep=None, engine="python")
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
