@@ -1,3 +1,4 @@
+from datetime import date
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -103,6 +104,14 @@ async def exportar_fondo_resumen_excel(
         default=None,
         description="Identificador del fondo a exportar. Solo aplica para ADMIN_GLOBAL.",
     ),
+    fecha_inicio: date | None = Query(
+        default=None,
+        description="Fecha inicio del período a exportar (inclusive).",
+    ),
+    fecha_fin: date | None = Query(
+        default=None,
+        description="Fecha fin del período a exportar (inclusive).",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(
         require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL)
@@ -196,34 +205,68 @@ async def exportar_fondo_resumen_excel(
 
             auditoria_id_fondo = "todos"
 
+    # Filtrar ventas por período si se especificó
+    from datetime import datetime, timezone
+    ventas_por_fondo: dict[int, dict] = {}
+    if fecha_inicio or fecha_fin:
+        fi = datetime(fecha_inicio.year, fecha_inicio.month, fecha_inicio.day, 0, 0, 0, tzinfo=timezone.utc) if fecha_inicio else None
+        ff = datetime(fecha_fin.year, fecha_fin.month, fecha_fin.day, 23, 59, 59, 999999, tzinfo=timezone.utc) if fecha_fin else None
+
+        for resumen in fondos_resumen:
+            q = (
+                select(
+                    func.count(Venta.id_venta),
+                    func.coalesce(func.sum(Venta.valor_total), 0),
+                )
+                .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
+                .where(Microcupo.id_fondo == resumen.id_fondo)
+            )
+            if fi:
+                q = q.where(Venta.fecha >= fi)
+            if ff:
+                q = q.where(Venta.fecha <= ff)
+            r = await db.execute(q)
+            count, monto = r.one()
+            ventas_por_fondo[resumen.id_fondo] = {
+                "total_ventas": int(count),
+                "saldo_ejecutado": float(monto),
+            }
+
     # Generar archivo Excel en memoria
     wb = Workbook()
     ws = wb.active
     ws.title = "Fondos"
 
+    periodo = ""
+    if fecha_inicio or fecha_fin:
+        desde = fecha_inicio.strftime("%d/%m/%Y") if fecha_inicio else "inicio"
+        hasta = fecha_fin.strftime("%d/%m/%Y") if fecha_fin else "hoy"
+        periodo = f" ({desde} - {hasta})"
+
     headers = [
         "Nombre del Fondo",
         "NIT",
         "Cupo Total",
-        "Saldo Ejecutado",
+        f"Ventas ejecutadas{periodo}",
         "Saldo Reservado",
         "Saldo Disponible",
-        "Total Ventas",
+        f"Total transacciones{periodo}",
         "Porcentaje de Ejecución",
         "Porcentaje de Compromiso",
     ]
     ws.append(headers)
 
     for resumen in fondos_resumen:
+        filtrado = ventas_por_fondo.get(resumen.id_fondo)
         ws.append(
             [
                 resumen.nombre_fondo,
                 resumen.nit,
                 float(resumen.valor_total),
-                float(resumen.saldo_ejecutado),
+                filtrado["saldo_ejecutado"] if filtrado else float(resumen.saldo_ejecutado),
                 float(resumen.saldo_reservado),
                 float(resumen.valor_disponible),
-                resumen.total_ventas,
+                filtrado["total_ventas"] if filtrado else resumen.total_ventas,
                 resumen.porcentaje_ejecucion,
                 resumen.porcentaje_compromiso,
             ]
