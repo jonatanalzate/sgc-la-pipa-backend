@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 
+from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi import Depends, FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +33,20 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SGC La Pipa", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://sgc-la-pipa-frontend-git-d0d82b-jonatan-rojas-alzates-projects.vercel.app",
+        "https://*.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.add_middleware(IPWhitelistMiddleware)
 
 
