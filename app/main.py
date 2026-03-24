@@ -29,6 +29,9 @@ from app.routes import (
 async def lifespan(app: FastAPI):
     # Inicializa la base de datos (crea tablas si no existen)
     await init_db()
+    # Seed de roles y sysadmin (idempotente)
+    from seed import seed
+    await seed()
     yield
 
 
