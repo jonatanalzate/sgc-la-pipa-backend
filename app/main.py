@@ -37,14 +37,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SGC La Pipa", lifespan=lifespan)
 
+import os
+
+_frontend_url = os.getenv("FRONTEND_URL", "")
+_allowed_origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "https://sgc-la-pipa-frontend-git-d0d82b-jonatan-rojas-alzates-projects.vercel.app",
+    "https://sgc-la-pipa-frontend-svhh.vercel.app",
+]
+if _frontend_url and _frontend_url not in _allowed_origins:
+    _allowed_origins.append(_frontend_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://sgc-la-pipa-frontend-git-d0d82b-jonatan-rojas-alzates-projects.vercel.app",
-        "https://*.vercel.app",
-    ],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
