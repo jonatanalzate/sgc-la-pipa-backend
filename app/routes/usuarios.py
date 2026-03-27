@@ -41,19 +41,16 @@ async def _sync_fondos_ejecutivo(
 async def list_users(
     db: AsyncSession = Depends(get_db),
     current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
-    activo_only: bool = True,
 ):
     """
     Lista usuarios. Solo Admin Global.
-    - Por defecto solo devuelve activo==True.
+    Devuelve todos los usuarios (activos e inactivos).
     """
     query = select(Usuario).options(
         selectinload(Usuario.rol),
         selectinload(Usuario.fondo),
         selectinload(Usuario.fondos_asignados),
     )
-    if activo_only:
-        query = query.where(Usuario.activo.is_(True))
     result = await db.execute(query)
     usuarios = result.scalars().all()
     return [
@@ -203,6 +200,58 @@ async def update_user(
     )
 
 
+@router.patch("/{id_usuario}/toggle-activo", response_model=UserRead)
+async def toggle_activo_usuario(
+    id_usuario: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+):
+    """
+    Activa o desactiva un usuario (toggle).
+    Si estaba activo lo desactiva, si estaba inactivo lo activa.
+    """
+    result = await db.execute(select(Usuario).where(Usuario.id_usuario == id_usuario))
+    usuario = result.scalar_one_or_none()
+    if usuario is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado.",
+        )
+
+    usuario.activo = not usuario.activo
+    if not usuario.activo:
+        usuario.fecha_eliminacion = datetime.now(timezone.utc)
+    else:
+        usuario.fecha_eliminacion = None
+
+    await registrar_auditoria(
+        db, current_user,
+        acciones.ACTUALIZAR_USUARIO
+    )
+    await db.commit()
+    await db.refresh(usuario)
+
+    result = await db.execute(
+        select(Usuario)
+        .options(selectinload(Usuario.rol), selectinload(Usuario.fondo))
+        .where(Usuario.id_usuario == id_usuario)
+    )
+    usuario_con_rol = result.scalar_one()
+    return UserRead(
+        id_usuario=usuario_con_rol.id_usuario,
+        nombre=usuario_con_rol.nombre,
+        email=usuario_con_rol.email,
+        id_fondo=usuario_con_rol.id_fondo,
+        nombre_fondo=usuario_con_rol.fondo.nombre if usuario_con_rol.fondo else None,
+        activo=usuario_con_rol.activo,
+        fecha_creacion=usuario_con_rol.fecha_creacion,
+        fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
+        fecha_eliminacion=usuario_con_rol.fecha_eliminacion,
+        nombre_rol=usuario_con_rol.rol.nombre_rol if usuario_con_rol.rol else None,
+        fondos_asignados=[],
+    )
+
+
 @router.delete("/{id_usuario}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     id_usuario: int,
@@ -218,10 +267,7 @@ async def delete_user(
         )
 
     if not usuario.activo:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El usuario ya está desactivado.",
-        )
+        return None
 
     usuario.activo = False
     usuario.fecha_eliminacion = datetime.now(timezone.utc)
