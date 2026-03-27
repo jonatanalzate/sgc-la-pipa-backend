@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import Select, select
@@ -26,7 +26,7 @@ from app.models.auditoria import Auditoria
 from app.models.cupo_general import CupoGeneral
 from app.models.microcupo import Microcupo, MicrocupoEstado
 from app.models.usuario import Usuario
-from app.schemas.microcupo import MicrocupoAprobar, MicrocupoCreate, MicrocupoRead, MicrocupoUpdate
+from app.schemas.microcupo import MicrocupoCreate, MicrocupoRead, MicrocupoUpdate
 
 
 router = APIRouter(prefix="/microcupos", tags=["microcupos"])
@@ -50,15 +50,9 @@ async def create_microcupo(
     Lógica:
     - Verifica que el asociado pertenezca al mismo fondo (multi-tenancy).
     - Verifica que el CupoGeneral.valor_disponible sea >= monto.
-    - Crea el Microcupo en estado 'PENDIENTE' sin afectar el cupo general.
+    - Crea el Microcupo en estado 'APROBADO' y descuenta cupo de inmediato.
     - Todo dentro de una transacción atómica.
     """
-    if payload.fecha_vencimiento <= datetime.now(timezone.utc):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="La fecha de vencimiento debe ser una fecha futura.",
-        )
-
     tenant_id = ensure_fondo_user(current_user)
 
     # La sesión de get_db ya tiene una transacción (p. ej. por get_current_user).
@@ -77,11 +71,32 @@ async def create_microcupo(
                 detail="Asociado no encontrado para el fondo del usuario.",
             )
 
+        cupo_query: Select[tuple] = select(CupoGeneral).where(
+            CupoGeneral.id_fondo == asociado.id_fondo
+        )
+        cupo_result = await db.execute(cupo_query)
+        cupo = cupo_result.scalar_one_or_none()
+        if cupo is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El fondo no tiene un cupo general configurado.",
+            )
+
+        if cupo.valor_disponible < payload.monto:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Saldo insuficiente en el fondo para crear este microcupo.",
+            )
+
+        cupo.valor_disponible -= payload.monto
+
         # Crear el microcupo asociado
         microcupo = Microcupo(
             monto=payload.monto,
-            estado=MicrocupoEstado.PENDIENTE,
-            fecha_vencimiento=payload.fecha_vencimiento,
+            estado=MicrocupoEstado.APROBADO,
+            fecha_vencimiento=payload.fecha_vencimiento
+            if payload.fecha_vencimiento is not None
+            else datetime.now(timezone.utc) + timedelta(days=30),
             producto_referencia=payload.producto_referencia,
             modalidad_entrega=payload.modalidad_entrega,
             direccion_entrega=payload.direccion_entrega,
@@ -183,23 +198,21 @@ async def get_microcupo(
 
 
 @router.patch(
-    "/{id_microcupo}/aprobar",
+    "/{id_microcupo}/cancelar",
     response_model=MicrocupoRead,
 )
-async def aprobar_microcupo(
+async def cancelar_microcupo(
     id_microcupo: int,
-    data: MicrocupoAprobar | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, EJECUTIVO_COMERCIAL)),
+    current_user: Usuario = Depends(require_roles(ADMIN_FONDO, EJECUTIVO_COMERCIAL)),
 ):
     """
-    PATCH /microcupos/{id_microcupo}/aprobar
+    PATCH /microcupos/{id_microcupo}/cancelar
 
-    - Solo ADMIN_GLOBAL.
-    - Solo se pueden aprobar microcupos en estado PENDIENTE.
-    - Valida saldo disponible en el cupo general del fondo del asociado.
-    - Descuenta el saldo y cambia el estado del microcupo a APROBADO.
-    - Registra auditoría 'MICROCUPO_APROBADO;id={id_microcupo}'.
+    - ADMIN_FONDO y EJECUTIVO_COMERCIAL.
+    - Solo se pueden cancelar microcupos en estado APROBADO.
+    - Devuelve el saldo al cupo general y cambia el estado del microcupo a DENEGADO.
+    - Registra auditoría MICROCUPO_DENEGADO.
     """
     try:
         query: Select[tuple] = (
@@ -217,14 +230,11 @@ async def aprobar_microcupo(
 
         microcupo, id_fondo = row
 
-        if microcupo.estado != MicrocupoEstado.PENDIENTE:
+        if microcupo.estado != MicrocupoEstado.APROBADO:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Solo se pueden aprobar microcupos en estado PENDIENTE.",
+                detail="Solo se pueden cancelar microcupos en estado APROBADO.",
             )
-
-        if data and data.fecha_vencimiento is not None:
-            microcupo.fecha_vencimiento = data.fecha_vencimiento
 
         cupo_query: Select[tuple] = select(CupoGeneral).where(
             CupoGeneral.id_fondo == id_fondo,
@@ -237,18 +247,11 @@ async def aprobar_microcupo(
                 detail="El fondo no tiene un cupo general configurado.",
             )
 
-        monto = microcupo.monto
-        if cupo.valor_disponible < monto:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El fondo no tiene saldo disponible suficiente.",
-            )
-
-        cupo.valor_disponible -= monto
-        microcupo.estado = MicrocupoEstado.APROBADO
+        cupo.valor_disponible += microcupo.monto
+        microcupo.estado = MicrocupoEstado.DENEGADO
         microcupo.id_fondo = id_fondo
 
-        await registrar_auditoria(db, current_user, acciones.MICROCUPO_APROBADO)
+        await registrar_auditoria(db, current_user, acciones.MICROCUPO_DENEGADO)
         await db.commit()
     except HTTPException:
         await db.rollback()
@@ -268,34 +271,47 @@ async def aprobar_microcupo(
 async def denegar_microcupo(
     id_microcupo: int,
     db: AsyncSession = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL, EJECUTIVO_COMERCIAL)),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
 ):
     """
     PATCH /microcupos/{id_microcupo}/denegar
 
     - Solo ADMIN_GLOBAL.
-    - Solo se pueden denegar microcupos en estado PENDIENTE.
-    - No afecta el cupo general.
-    - Registra auditoría 'MICROCUPO_DENEGADO;id={id_microcupo}'.
+    - Solo se pueden denegar microcupos en estado APROBADO.
+    - Devuelve saldo al cupo general.
+    - Registra auditoría MICROCUPO_DENEGADO.
     """
     try:
-        query: Select[tuple] = select(Microcupo).where(
-            Microcupo.id_microcupo == id_microcupo
+        query: Select[tuple] = (
+            select(Microcupo, Asociado.id_fondo)
+            .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
+            .where(Microcupo.id_microcupo == id_microcupo)
         )
         result = await db.execute(query)
-        microcupo = result.scalar_one_or_none()
-        if microcupo is None:
+        row = result.one_or_none()
+        if row is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Microcupo no encontrado.",
             )
+        microcupo, id_fondo = row
 
-        if microcupo.estado != MicrocupoEstado.PENDIENTE:
+        if microcupo.estado != MicrocupoEstado.APROBADO:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Solo se pueden denegar microcupos en estado PENDIENTE.",
+                detail="Solo se pueden denegar microcupos en estado APROBADO.",
             )
 
+        cupo_query: Select[tuple] = select(CupoGeneral).where(CupoGeneral.id_fondo == id_fondo)
+        cupo_result = await db.execute(cupo_query)
+        cupo = cupo_result.scalar_one_or_none()
+        if cupo is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El fondo no tiene un cupo general configurado.",
+            )
+
+        cupo.valor_disponible += microcupo.monto
         microcupo.estado = MicrocupoEstado.DENEGADO
 
         await registrar_auditoria(db, current_user, acciones.MICROCUPO_DENEGADO)
@@ -322,7 +338,7 @@ async def update_microcupo(
     """
     Actualización parcial de un microcupo (fecha_vencimiento, producto_referencia, estado).
     No se puede cambiar monto ni id_asociado.
-    Los estados APROBADO y DENEGADO solo se gestionan desde sus endpoints dedicados.
+    Solo se protege la transición a CONSUMIDO.
     """
     query: Select[tuple] = select(Microcupo).join(
         Asociado, Microcupo.id_asociado == Asociado.id_asociado
@@ -342,18 +358,12 @@ async def update_microcupo(
 
     if "estado" in update_data:
         nuevo_estado = update_data["estado"]
-        if nuevo_estado == MicrocupoEstado.VENCIDO:
+        if nuevo_estado == MicrocupoEstado.CONSUMIDO:
             if microcupo.estado != MicrocupoEstado.APROBADO:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No se puede vencer un microcupo ya consumido.",
+                    detail="Solo se puede marcar como CONSUMIDO un microcupo en estado APROBADO.",
                 )
-        elif nuevo_estado in (MicrocupoEstado.APROBADO, MicrocupoEstado.DENEGADO):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Los estados APROBADO y DENEGADO solo se gestionan mediante sus endpoints dedicados.",
-            )
-
     for field, value in update_data.items():
         setattr(microcupo, field, value)
 

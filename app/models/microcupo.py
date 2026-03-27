@@ -9,11 +9,10 @@ from app.models.mixins import TimestampMixin
 
 
 class MicrocupoEstado(str, PyEnum):
-    PENDIENTE = "pendiente"
-    APROBADO = "aprobado"
-    CONSUMIDO = "consumido"
-    VENCIDO = "vencido"
-    DENEGADO = "denegado"
+    APROBADO = "APROBADO"
+    CONSUMIDO = "CONSUMIDO"
+    VENCIDO = "VENCIDO"
+    DENEGADO = "DENEGADO"
 
 
 class ModalidadEntrega(str, PyEnum):
@@ -29,7 +28,7 @@ class Microcupo(TimestampMixin, Base):
     estado: Mapped[MicrocupoEstado] = mapped_column(
         SQLEnum(MicrocupoEstado, name="microcupo_estado"),
         nullable=False,
-        default=MicrocupoEstado.PENDIENTE,
+        default=MicrocupoEstado.APROBADO,
     )
     fecha_vencimiento: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     producto_referencia: Mapped[str] = mapped_column(String(255), nullable=True)

@@ -24,7 +24,7 @@ class MicrocupoBase(BaseModel):
 
     @field_validator("fecha_vencimiento", mode="after")
     @classmethod
-    def normalizar_timezone(cls, v: datetime) -> datetime:
+    def normalizar_timezone(cls, v: datetime | None) -> datetime | None:
         return _normalizar_tz(v)
 
     modalidad_entrega: ModalidadEntrega | None = Field(
@@ -39,6 +39,7 @@ class MicrocupoBase(BaseModel):
 
 class MicrocupoCreate(MicrocupoBase):
     id_asociado: int = Field(..., description="Identificador del asociado beneficiario.")
+    fecha_vencimiento: datetime | None = None
 
     @model_validator(mode="after")
     def validar_domicilio(self) -> "MicrocupoCreate":
@@ -59,21 +60,6 @@ class MicrocupoUpdate(BaseModel):
     ciudad_entrega: str | None = Field(default=None, max_length=100)
     telefono_contacto: str | None = Field(default=None, max_length=20)
     notas_entrega: str | None = Field(default=None, max_length=500)
-
-    @field_validator("fecha_vencimiento", mode="after")
-    @classmethod
-    def normalizar_timezone(cls, v: datetime | None) -> datetime | None:
-        return _normalizar_tz(v)
-
-
-class MicrocupoAprobar(BaseModel):
-    fecha_vencimiento: datetime | None = Field(
-        default=None,
-        description=(
-            "Opcional. Si se envía, sobreescribe la fecha "
-            "de vencimiento propuesta por el creador del microcupo."
-        ),
-    )
 
     @field_validator("fecha_vencimiento", mode="after")
     @classmethod
