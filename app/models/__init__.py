@@ -9,6 +9,7 @@ from .asociado import Asociado  # noqa: F401
 from .usuario import Usuario  # noqa: F401
 from .microcupo import Microcupo  # noqa: F401
 from .venta import Venta  # noqa: F401
+from .punto_de_venta import PuntoDeVenta  # noqa: F401
 from .entrega import Entrega  # noqa: F401
 from .auditoria import Auditoria  # noqa: F401
 from .ip_whitelist import IPWhitelist  # noqa: F401

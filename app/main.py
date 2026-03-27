@@ -15,6 +15,7 @@ from app.routes import (
     fondos,
     ip_whitelist,
     microcupos,
+    puntos_de_venta,
     usuarios,
     ventas,
     entregas,
@@ -77,6 +78,7 @@ app.include_router(asociados.router)
 app.include_router(cupos.router)
 app.include_router(microcupos.router)
 app.include_router(ventas.router)
+app.include_router(puntos_de_venta.router)
 app.include_router(entregas.router)
 app.include_router(reportes.router)
 app.include_router(dashboard.router)

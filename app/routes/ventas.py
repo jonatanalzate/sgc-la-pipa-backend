@@ -24,6 +24,7 @@ from app.database.config import get_db
 from app.models.asociado import Asociado
 from app.models.entrega import Entrega
 from app.models.microcupo import Microcupo, MicrocupoEstado
+from app.models.punto_de_venta import PuntoDeVenta
 from app.models.usuario import Usuario
 from app.models.venta import Venta
 from app.schemas.venta import VentaCreate, VentaRead
@@ -32,7 +33,12 @@ from app.schemas.venta import VentaCreate, VentaRead
 router = APIRouter(prefix="/ventas", tags=["ventas"])
 
 
-def _build_venta_read(venta: Venta, nombre_asociado: str | None, id_entrega: int | None) -> VentaRead:
+def _build_venta_read(
+    venta: Venta,
+    nombre_asociado: str | None,
+    id_entrega: int | None,
+    nombre_punto_venta: str | None = None,
+) -> VentaRead:
     return VentaRead(
         id_venta=venta.id_venta,
         fecha=venta.fecha,
@@ -44,6 +50,13 @@ def _build_venta_read(venta: Venta, nombre_asociado: str | None, id_entrega: int
         id_usuario_tienda=venta.id_usuario_tienda,
         nombre_asociado=nombre_asociado,
         id_entrega=id_entrega,
+        numero_factura=venta.numero_factura,
+        id_punto_venta=venta.id_punto_venta,
+        nombre_punto_venta=nombre_punto_venta,
+        tipo_entrega=venta.tipo_entrega,
+        numero_guia=venta.numero_guia,
+        origen=venta.origen,
+        destino=venta.destino,
     )
 
 
@@ -63,10 +76,16 @@ async def list_ventas(
     - Usuario de fondo: solo ventas de microcupos de asociados de su fondo.
     """
     query: Select[tuple] = (
-        select(Venta, Asociado.nombre, Entrega.id_entrega)
+        select(
+            Venta,
+            Asociado.nombre.label("nombre_asociado"),
+            Entrega.id_entrega,
+            PuntoDeVenta.nombre.label("nombre_punto_venta"),
+        )
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
         .outerjoin(Entrega, Venta.id_venta == Entrega.id_venta)
+        .outerjoin(PuntoDeVenta, Venta.id_punto_venta == PuntoDeVenta.id_punto_venta)
     )
     if tenant_ids:
         query = query.where(Asociado.id_fondo.in_(tenant_ids))
@@ -85,8 +104,8 @@ async def list_ventas(
     rows = result.all()
 
     return [
-        _build_venta_read(venta, nombre_asociado, id_entrega)
-        for venta, nombre_asociado, id_entrega in rows
+        _build_venta_read(venta, nombre_asociado, id_entrega, nombre_punto_venta)
+        for venta, nombre_asociado, id_entrega, nombre_punto_venta in rows
     ]
 
 
@@ -101,10 +120,16 @@ async def get_venta(
     Detalle de una venta individual. 404 si no existe o no pertenece al fondo del usuario.
     """
     query: Select[tuple] = (
-        select(Venta, Asociado.nombre, Entrega.id_entrega)
+        select(
+            Venta,
+            Asociado.nombre.label("nombre_asociado"),
+            Entrega.id_entrega,
+            PuntoDeVenta.nombre.label("nombre_punto_venta"),
+        )
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
         .outerjoin(Entrega, Venta.id_venta == Entrega.id_venta)
+        .outerjoin(PuntoDeVenta, Venta.id_punto_venta == PuntoDeVenta.id_punto_venta)
         .where(Venta.id_venta == id_venta)
     )
     if tenant_ids:
@@ -117,8 +142,8 @@ async def get_venta(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Venta no encontrada.",
         )
-    venta, nombre_asociado, id_entrega = row
-    return _build_venta_read(venta, nombre_asociado, id_entrega)
+    venta, nombre_asociado, id_entrega, nombre_punto_venta = row
+    return _build_venta_read(venta, nombre_asociado, id_entrega, nombre_punto_venta)
 
 
 @router.post(
@@ -156,6 +181,7 @@ async def crear_venta(
 
     # La sesión de get_db ya tiene una transacción (p. ej. por get_current_user).
     # No usar db.begin() para evitar InvalidRequestError ("A transaction is already begun").
+    id_entrega: int | None = None
     try:
         # Buscar el microcupo. Para usuarios de fondo se filtra por su propio fondo.
         # ADMIN_GLOBAL y TIENDA_OPERADOR (sin id_fondo) pueden operar sobre cualquier fondo.
@@ -190,7 +216,6 @@ async def crear_venta(
         # Cambiar estado del microcupo a CONSUMIDO
         microcupo.estado = MicrocupoEstado.CONSUMIDO
 
-        # Crear la venta asociada
         venta = Venta(
             fecha=datetime.now(timezone.utc),
             valor_total=microcupo.monto,
@@ -199,8 +224,26 @@ async def crear_venta(
             id_asociado=microcupo.id_asociado,
             id_fondo=asociado.id_fondo if asociado is not None else tenant_id,
             id_usuario_tienda=current_user.id_usuario,
+            numero_factura=payload.numero_factura,
+            id_punto_venta=payload.id_punto_venta,
+            tipo_entrega=payload.tipo_entrega,
+            numero_guia=payload.numero_guia,
+            origen=payload.origen,
+            destino=payload.destino,
         )
         db.add(venta)
+        await db.flush()
+
+        if payload.tipo_entrega is not None:
+            entrega = Entrega(
+                tipo_entrega=payload.tipo_entrega,
+                fecha_entrega=venta.fecha,
+                id_venta=venta.id_venta,
+                id_fondo=venta.id_fondo,
+            )
+            db.add(entrega)
+            await db.flush()
+            id_entrega = entrega.id_entrega
 
         await registrar_auditoria(db, current_user, acciones.VENTA_REALIZADA)
         await db.commit()
@@ -216,5 +259,12 @@ async def crear_venta(
         select(Asociado.nombre).where(Asociado.id_asociado == microcupo.id_asociado)
     )
     nombre_asociado = nombre_asociado_result.scalar_one_or_none()
-    return _build_venta_read(venta, nombre_asociado, None)
+    nombre_punto_venta: str | None = None
+    if venta.id_punto_venta is not None:
+        nombre_pv_result = await db.execute(
+            select(PuntoDeVenta.nombre).where(PuntoDeVenta.id_punto_venta == venta.id_punto_venta)
+        )
+        nombre_punto_venta = nombre_pv_result.scalar_one_or_none()
+
+    return _build_venta_read(venta, nombre_asociado, id_entrega, nombre_punto_venta)
 

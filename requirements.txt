@@ -9,4 +9,4 @@ passlib[bcrypt]
 python-multipart
 email-validator
 pandas
-openpyxl
+openpyxlalembic

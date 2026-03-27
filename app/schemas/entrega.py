@@ -25,6 +25,7 @@ class EntregaRead(BaseModel):
     fecha_entrega: datetime
     id_venta: int
     id_fondo: int
+    nombre_asociado: str | None = None
 
     class Config:
         from_attributes = True

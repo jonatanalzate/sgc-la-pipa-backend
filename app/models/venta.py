@@ -34,6 +34,16 @@ class Venta(Base):
         nullable=False,
     )
 
+    numero_factura: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    id_punto_venta: Mapped[int | None] = mapped_column(
+        ForeignKey("puntos_de_venta.id_punto_venta"),
+        nullable=True,
+    )
+    tipo_entrega: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    numero_guia: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    origen: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    destino: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     microcupo: Mapped["Microcupo"] = relationship(
         "Microcupo",
         back_populates="ventas",
@@ -48,5 +58,10 @@ class Venta(Base):
         "Entrega",
         back_populates="venta",
         uselist=False,
+    )
+
+    punto_de_venta: Mapped["PuntoDeVenta | None"] = relationship(
+        "PuntoDeVenta",
+        back_populates="ventas",
     )
 
