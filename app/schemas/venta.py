@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 class VentaCreate(BaseModel):
     id_microcupo: int = Field(..., description="Identificador del microcupo a consumir.")
     producto_detalle: str | None = Field(default=None, max_length=255)
+    observaciones: str | None = Field(default=None, max_length=500)
     numero_factura: str | None = Field(default=None, max_length=100)
     id_punto_venta: int | None = Field(default=None)
     tipo_entrega: Literal["TIENDA", "DOMICILIO"] | None = Field(default=None)
@@ -37,6 +38,7 @@ class VentaRead(BaseModel):
     fecha: datetime
     valor_total: Decimal
     producto_detalle: str | None
+    observaciones: str | None = None
     id_microcupo: int
     id_asociado: int
     id_fondo: int

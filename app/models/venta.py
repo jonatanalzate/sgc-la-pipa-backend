@@ -13,6 +13,7 @@ class Venta(Base):
     fecha: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     valor_total: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     producto_detalle: Mapped[str] = mapped_column(String(255), nullable=True)
+    observaciones: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     id_microcupo: Mapped[int] = mapped_column(
         ForeignKey("microcupos.id_microcupo"),
