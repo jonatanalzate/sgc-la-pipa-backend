@@ -3,6 +3,11 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi import Depends, FastAPI
+
+import logging
+from app.core.scheduler import start_scheduler, shutdown_scheduler
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,12 +33,17 @@ from app.routes import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Inicializa la base de datos (crea tablas si no existen)
     await init_db()
-    # Seed de roles y sysadmin (idempotente)
     from seed import seed
     await seed()
+
+    start_scheduler()
+    logger.info("[scheduler] APScheduler iniciado.")
+
     yield
+
+    shutdown_scheduler()
+    logger.info("[scheduler] APScheduler detenido.")
 
 
 app = FastAPI(title="SGC La Pipa", lifespan=lifespan)

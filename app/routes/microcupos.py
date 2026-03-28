@@ -96,7 +96,7 @@ async def create_microcupo(
             estado=MicrocupoEstado.APROBADO,
             fecha_vencimiento=payload.fecha_vencimiento
             if payload.fecha_vencimiento is not None
-            else datetime.now(timezone.utc) + timedelta(days=30),
+            else datetime.now(timezone.utc) + timedelta(days=15),
             producto_referencia=payload.producto_referencia,
             modalidad_entrega=payload.modalidad_entrega,
             direccion_entrega=payload.direccion_entrega,

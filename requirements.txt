@@ -11,3 +11,4 @@ email-validator
 pandas
 openpyxl
 alembic
+apscheduler==3.10.4
