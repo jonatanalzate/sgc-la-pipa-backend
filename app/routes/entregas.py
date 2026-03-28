@@ -36,10 +36,11 @@ async def list_entregas(
     tenant_id = get_tenant_id(current_user)
 
     query: Select[tuple] = (
-        select(Entrega, Asociado.nombre)
+        select(Entrega, Asociado.nombre, Usuario.nombre.label("nombre_usuario_tienda"))
         .join(Venta, Entrega.id_venta == Venta.id_venta)
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
+        .join(Usuario, Venta.id_usuario_tienda == Usuario.id_usuario)
     )
     if tenant_id is not None:
         query = query.where(Asociado.id_fondo == tenant_id)
@@ -61,9 +62,10 @@ async def list_entregas(
             fecha_entrega=e.fecha_entrega,
             id_venta=e.id_venta,
             id_fondo=e.id_fondo,
-            nombre_asociado=nombre,
+            nombre_asociado=nombre_asociado,
+            nombre_usuario_tienda=nombre_usuario_tienda,
         )
-        for e, nombre in rows
+        for e, nombre_asociado, nombre_usuario_tienda in rows
     ]
 
 
@@ -79,10 +81,11 @@ async def get_entrega(
     tenant_id = get_tenant_id(current_user)
 
     query: Select[tuple] = (
-        select(Entrega, Asociado.nombre)
+        select(Entrega, Asociado.nombre, Usuario.nombre.label("nombre_usuario_tienda"))
         .join(Venta, Entrega.id_venta == Venta.id_venta)
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
+        .join(Usuario, Venta.id_usuario_tienda == Usuario.id_usuario)
         .where(Entrega.id_entrega == id_entrega)
     )
     if tenant_id is not None:
@@ -95,12 +98,13 @@ async def get_entrega(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Entrega no encontrada.",
         )
-    entrega, nombre = row
+    entrega, nombre_asociado, nombre_usuario_tienda = row
     return EntregaRead(
         id_entrega=entrega.id_entrega,
         tipo_entrega=entrega.tipo_entrega,
         fecha_entrega=entrega.fecha_entrega,
         id_venta=entrega.id_venta,
         id_fondo=entrega.id_fondo,
-        nombre_asociado=nombre,
+        nombre_asociado=nombre_asociado,
+        nombre_usuario_tienda=nombre_usuario_tienda,
     )

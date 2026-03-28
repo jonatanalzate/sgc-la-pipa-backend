@@ -4,13 +4,6 @@ from pydantic import BaseModel, Field
 
 
 class EntregaCreate(BaseModel):
-    """
-    Esquema de entrada para registrar la entrega de un producto vendido.
-
-    - Solo puede existir una entrega por venta.
-    - El tipo de entrega se espera como 'Presencial' o 'Envío' (validado a nivel de API).
-    """
-
     id_venta: int = Field(..., description="Identificador de la venta asociada.")
     tipo_entrega: str = Field(
         ...,
@@ -26,7 +19,7 @@ class EntregaRead(BaseModel):
     id_venta: int
     id_fondo: int
     nombre_asociado: str | None = None
+    nombre_usuario_tienda: str | None = None
 
     class Config:
         from_attributes = True
-
