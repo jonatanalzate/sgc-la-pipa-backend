@@ -21,10 +21,17 @@ from app.models.cupo_general import CupoGeneral
 from app.models.fondo import Fondo
 from app.models.microcupo import Microcupo, MicrocupoEstado
 from app.models.usuario import Usuario
+from app.models.usuario import Usuario as UsuarioModel
 from app.models.venta import Venta
 from app.routes.cupos import _build_fondo_resumen_financiero
 from app.schemas.cupo import FondoResumenFinanciero
-from app.schemas.reporte import FondoResumenRead
+from app.schemas.reporte import (
+    EvolucionVentasItem,
+    FondoResumenRead,
+    MicrocuposEstadoItem,
+    VentasPorEjecutivoItem,
+    VentasPorFondoItem,
+)
 
 
 router = APIRouter(prefix="/reportes", tags=["reportes"])
@@ -292,4 +299,175 @@ async def exportar_fondo_resumen_excel(
             "Content-Disposition": 'attachment; filename="reporte_fondos.xlsx"'
         },
     )
+
+
+@router.get(
+    "/graficas/ventas-por-ejecutivo",
+    response_model=list[VentasPorEjecutivoItem],
+)
+async def get_ventas_por_ejecutivo(
+    id_fondo: int | None = Query(default=None),
+    fecha_inicio: date | None = Query(default=None),
+    fecha_fin: date | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+):
+    from datetime import datetime, timezone
+
+    q = (
+        select(
+            UsuarioModel.nombre.label("nombre_ejecutivo"),
+            func.count(Venta.id_venta).label("total_ventas"),
+            func.coalesce(func.sum(Venta.valor_total), 0).label("monto_total"),
+        )
+        .join(UsuarioModel, Venta.id_usuario_tienda == UsuarioModel.id_usuario)
+        .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
+    )
+    if id_fondo is not None:
+        q = q.where(Venta.id_fondo == id_fondo)
+    if fecha_inicio:
+        fi = datetime(fecha_inicio.year, fecha_inicio.month, fecha_inicio.day, 0, 0, 0, tzinfo=timezone.utc)
+        q = q.where(Venta.fecha >= fi)
+    if fecha_fin:
+        ff = datetime(fecha_fin.year, fecha_fin.month, fecha_fin.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
+        q = q.where(Venta.fecha <= ff)
+    q = q.group_by(UsuarioModel.nombre).order_by(func.sum(Venta.valor_total).desc())
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        VentasPorEjecutivoItem(
+            nombre_ejecutivo=r.nombre_ejecutivo,
+            total_ventas=r.total_ventas,
+            monto_total=r.monto_total,
+        )
+        for r in rows
+    ]
+
+
+@router.get(
+    "/graficas/ventas-por-fondo",
+    response_model=list[VentasPorFondoItem],
+)
+async def get_ventas_por_fondo(
+    fecha_inicio: date | None = Query(default=None),
+    fecha_fin: date | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+):
+    from datetime import datetime, timezone
+
+    q = (
+        select(
+            Fondo.nombre.label("nombre_fondo"),
+            func.count(Venta.id_venta).label("total_ventas"),
+            func.coalesce(func.sum(Venta.valor_total), 0).label("monto_total"),
+        )
+        .join(Fondo, Venta.id_fondo == Fondo.id_fondo)
+    )
+    if fecha_inicio:
+        fi = datetime(fecha_inicio.year, fecha_inicio.month, fecha_inicio.day, 0, 0, 0, tzinfo=timezone.utc)
+        q = q.where(Venta.fecha >= fi)
+    if fecha_fin:
+        ff = datetime(fecha_fin.year, fecha_fin.month, fecha_fin.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
+        q = q.where(Venta.fecha <= ff)
+    q = q.group_by(Fondo.nombre).order_by(func.sum(Venta.valor_total).desc())
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        VentasPorFondoItem(
+            nombre_fondo=r.nombre_fondo,
+            total_ventas=r.total_ventas,
+            monto_total=r.monto_total,
+        )
+        for r in rows
+    ]
+
+
+@router.get(
+    "/graficas/evolucion-ventas",
+    response_model=list[EvolucionVentasItem],
+)
+async def get_evolucion_ventas(
+    agrupacion: str = Query(default="dia", description="dia | semana | mes | año"),
+    id_fondo: int | None = Query(default=None),
+    fecha_inicio: date | None = Query(default=None),
+    fecha_fin: date | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+):
+    from datetime import datetime, timezone, timedelta
+
+    # Default: últimos 3 días si no viene fecha_inicio
+    if fecha_inicio is None and fecha_fin is None:
+        hoy = datetime.now(timezone.utc).date()
+        fecha_inicio = hoy - timedelta(days=2)
+        fecha_fin = hoy
+
+    fi = datetime(fecha_inicio.year, fecha_inicio.month, fecha_inicio.day, 0, 0, 0, tzinfo=timezone.utc) if fecha_inicio else None
+    ff = datetime(fecha_fin.year, fecha_fin.month, fecha_fin.day, 23, 59, 59, 999999, tzinfo=timezone.utc) if fecha_fin else None
+
+    if agrupacion == "mes":
+        periodo_expr = func.to_char(Venta.fecha, "YYYY-MM")
+    elif agrupacion == "semana":
+        periodo_expr = func.to_char(Venta.fecha, "IYYY-IW")
+    elif agrupacion == "año":
+        periodo_expr = func.to_char(Venta.fecha, "YYYY")
+    else:  # dia (default)
+        periodo_expr = func.to_char(Venta.fecha, "YYYY-MM-DD")
+
+    q = (
+        select(
+            periodo_expr.label("periodo"),
+            func.count(Venta.id_venta).label("total_ventas"),
+            func.coalesce(func.sum(Venta.valor_total), 0).label("monto_total"),
+        )
+    )
+    if id_fondo is not None:
+        q = q.where(Venta.id_fondo == id_fondo)
+    if fi:
+        q = q.where(Venta.fecha >= fi)
+    if ff:
+        q = q.where(Venta.fecha <= ff)
+    q = q.group_by(periodo_expr).order_by(periodo_expr)
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        EvolucionVentasItem(
+            periodo=r.periodo,
+            total_ventas=r.total_ventas,
+            monto_total=r.monto_total,
+        )
+        for r in rows
+    ]
+
+
+@router.get(
+    "/graficas/microcupos-estado",
+    response_model=list[MicrocuposEstadoItem],
+)
+async def get_microcupos_estado(
+    id_fondo: int | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+):
+    q = (
+        select(
+            Microcupo.estado.label("estado"),
+            func.count(Microcupo.id_microcupo).label("cantidad"),
+            func.coalesce(func.sum(Microcupo.monto), 0).label("monto_total"),
+        )
+    )
+    if id_fondo is not None:
+        q = q.where(Microcupo.id_fondo == id_fondo)
+    q = q.group_by(Microcupo.estado).order_by(Microcupo.estado)
+    result = await db.execute(q)
+    rows = result.all()
+    return [
+        MicrocuposEstadoItem(
+            estado=r.estado.value if hasattr(r.estado, "value") else str(r.estado),
+            cantidad=r.cantidad,
+            monto_total=r.monto_total,
+        )
+        for r in rows
+    ]
 

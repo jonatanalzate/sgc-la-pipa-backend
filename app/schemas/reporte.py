@@ -17,3 +17,27 @@ class FondoResumenRead(BaseModel):
     monto_ejecutado: Decimal
     monto_reservado: Decimal
 
+
+class VentasPorEjecutivoItem(BaseModel):
+    nombre_ejecutivo: str
+    total_ventas: int
+    monto_total: Decimal
+
+
+class VentasPorFondoItem(BaseModel):
+    nombre_fondo: str
+    total_ventas: int
+    monto_total: Decimal
+
+
+class EvolucionVentasItem(BaseModel):
+    periodo: str
+    total_ventas: int
+    monto_total: Decimal
+
+
+class MicrocuposEstadoItem(BaseModel):
+    estado: str
+    cantidad: int
+    monto_total: Decimal
+
