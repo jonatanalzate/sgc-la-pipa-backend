@@ -43,6 +43,7 @@ class VentaRead(BaseModel):
     id_asociado: int
     id_fondo: int
     id_usuario_tienda: int
+    nombre_usuario_tienda: str | None = None
     nombre_asociado: str | None = None
     id_entrega: int | None = None
     numero_factura: str | None = None

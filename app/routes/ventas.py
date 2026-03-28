@@ -38,6 +38,7 @@ def _build_venta_read(
     nombre_asociado: str | None,
     id_entrega: int | None,
     nombre_punto_venta: str | None = None,
+    nombre_usuario_tienda: str | None = None,
 ) -> VentaRead:
     return VentaRead(
         id_venta=venta.id_venta,
@@ -58,6 +59,7 @@ def _build_venta_read(
         numero_guia=venta.numero_guia,
         origen=venta.origen,
         destino=venta.destino,
+        nombre_usuario_tienda=nombre_usuario_tienda,
     )
 
 
@@ -82,11 +84,13 @@ async def list_ventas(
             Asociado.nombre.label("nombre_asociado"),
             Entrega.id_entrega,
             PuntoDeVenta.nombre.label("nombre_punto_venta"),
+            Usuario.nombre.label("nombre_usuario_tienda"),
         )
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
         .outerjoin(Entrega, Venta.id_venta == Entrega.id_venta)
         .outerjoin(PuntoDeVenta, Venta.id_punto_venta == PuntoDeVenta.id_punto_venta)
+        .join(Usuario, Venta.id_usuario_tienda == Usuario.id_usuario)
     )
     if tenant_ids:
         query = query.where(Asociado.id_fondo.in_(tenant_ids))
@@ -105,8 +109,8 @@ async def list_ventas(
     rows = result.all()
 
     return [
-        _build_venta_read(venta, nombre_asociado, id_entrega, nombre_punto_venta)
-        for venta, nombre_asociado, id_entrega, nombre_punto_venta in rows
+        _build_venta_read(venta, nombre_asociado, id_entrega, nombre_punto_venta, nombre_usuario_tienda)
+        for venta, nombre_asociado, id_entrega, nombre_punto_venta, nombre_usuario_tienda in rows
     ]
 
 
@@ -126,11 +130,13 @@ async def get_venta(
             Asociado.nombre.label("nombre_asociado"),
             Entrega.id_entrega,
             PuntoDeVenta.nombre.label("nombre_punto_venta"),
+            Usuario.nombre.label("nombre_usuario_tienda"),
         )
         .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
         .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
         .outerjoin(Entrega, Venta.id_venta == Entrega.id_venta)
         .outerjoin(PuntoDeVenta, Venta.id_punto_venta == PuntoDeVenta.id_punto_venta)
+        .join(Usuario, Venta.id_usuario_tienda == Usuario.id_usuario)
         .where(Venta.id_venta == id_venta)
     )
     if tenant_ids:
@@ -143,8 +149,8 @@ async def get_venta(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Venta no encontrada.",
         )
-    venta, nombre_asociado, id_entrega, nombre_punto_venta = row
-    return _build_venta_read(venta, nombre_asociado, id_entrega, nombre_punto_venta)
+    venta, nombre_asociado, id_entrega, nombre_punto_venta, nombre_usuario_tienda = row
+    return _build_venta_read(venta, nombre_asociado, id_entrega, nombre_punto_venta, nombre_usuario_tienda)
 
 
 @router.post(
