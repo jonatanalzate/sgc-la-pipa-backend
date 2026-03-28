@@ -18,6 +18,7 @@ from app.core.roles import ADMIN_FONDO, ADMIN_GLOBAL, EJECUTIVO_COMERCIAL, _get_
 from app.database.config import get_db
 from app.models.asociado import Asociado
 from app.models.cupo_general import CupoGeneral
+from app.models.ejecutivo_fondos import EjecutivoFondo
 from app.models.fondo import Fondo
 from app.models.microcupo import Microcupo, MicrocupoEstado
 from app.models.usuario import Usuario
@@ -320,18 +321,26 @@ async def get_ventas_por_ejecutivo(
             func.count(Venta.id_venta).label("total_ventas"),
             func.coalesce(func.sum(Venta.valor_total), 0).label("monto_total"),
         )
-        .join(UsuarioModel, Venta.id_usuario_tienda == UsuarioModel.id_usuario)
-        .join(Microcupo, Venta.id_microcupo == Microcupo.id_microcupo)
+        .join(EjecutivoFondo, Venta.id_fondo == EjecutivoFondo.id_fondo)
+        .join(UsuarioModel, EjecutivoFondo.id_usuario == UsuarioModel.id_usuario)
     )
     if id_fondo is not None:
         q = q.where(Venta.id_fondo == id_fondo)
     if fecha_inicio:
-        fi = datetime(fecha_inicio.year, fecha_inicio.month, fecha_inicio.day, 0, 0, 0, tzinfo=timezone.utc)
+        fi = datetime(
+            fecha_inicio.year, fecha_inicio.month, fecha_inicio.day,
+            0, 0, 0, tzinfo=timezone.utc,
+        )
         q = q.where(Venta.fecha >= fi)
     if fecha_fin:
-        ff = datetime(fecha_fin.year, fecha_fin.month, fecha_fin.day, 23, 59, 59, 999999, tzinfo=timezone.utc)
+        ff = datetime(
+            fecha_fin.year, fecha_fin.month, fecha_fin.day,
+            23, 59, 59, 999999, tzinfo=timezone.utc,
+        )
         q = q.where(Venta.fecha <= ff)
-    q = q.group_by(UsuarioModel.nombre).order_by(func.sum(Venta.valor_total).desc())
+    q = q.group_by(UsuarioModel.nombre).order_by(
+        func.sum(Venta.valor_total).desc()
+    )
     result = await db.execute(q)
     rows = result.all()
     return [
