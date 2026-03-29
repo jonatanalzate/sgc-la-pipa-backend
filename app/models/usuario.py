@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, ForeignKey, String
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.config import Base
@@ -9,11 +11,26 @@ from app.models.mixins import TimestampMixin, SoftDeleteMixin
 class Usuario(TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "usuarios"
 
-    id_usuario: Mapped[int] = mapped_column(primary_key=True, index=True)
+    id_usuario: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     nombre: Mapped[str] = mapped_column(String(150), nullable=False)
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     email: Mapped[str] = mapped_column(String(150), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    intentos_fallidos: Mapped[int] = mapped_column(
+        default=0, nullable=False
+    )
+    bloqueado_hasta: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    bloqueado_permanente: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    reset_token: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    reset_token_expira: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     id_rol: Mapped[int] = mapped_column(
         ForeignKey("roles.id_rol"),

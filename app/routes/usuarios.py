@@ -16,7 +16,7 @@ from app.models.fondo import Fondo
 from app.models.rol import Rol
 from app.models.usuario import Usuario
 from app.models.ejecutivo_fondos import EjecutivoFondo
-from app.schemas.user import UserCreate, UserPasswordChange, UserRead, UserUpdate
+from app.schemas.user import UserCreate, UserPasswordChange, UserPasswordReset, UserRead, UserUpdate
 
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"])
@@ -61,6 +61,8 @@ async def list_users(
             id_fondo=u.id_fondo,
             nombre_fondo=u.fondo.nombre if u.fondo else None,
             activo=u.activo,
+            intentos_fallidos=u.intentos_fallidos or 0,
+            bloqueado_permanente=u.bloqueado_permanente,
             fecha_creacion=u.fecha_creacion,
             fecha_actualizacion=u.fecha_actualizacion,
             fecha_eliminacion=u.fecha_eliminacion,
@@ -128,6 +130,8 @@ async def create_user(
         id_fondo=usuario_con_rol.id_fondo,
         nombre_fondo=usuario_con_rol.fondo.nombre if usuario_con_rol.fondo else None,
         activo=usuario_con_rol.activo,
+        intentos_fallidos=usuario_con_rol.intentos_fallidos or 0,
+        bloqueado_permanente=usuario_con_rol.bloqueado_permanente,
         fecha_creacion=usuario_con_rol.fecha_creacion,
         fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
         fecha_eliminacion=usuario_con_rol.fecha_eliminacion,
@@ -193,6 +197,8 @@ async def update_user(
         id_fondo=usuario_con_rol.id_fondo,
         nombre_fondo=usuario_con_rol.fondo.nombre if usuario_con_rol.fondo else None,
         activo=usuario_con_rol.activo,
+        intentos_fallidos=usuario_con_rol.intentos_fallidos or 0,
+        bloqueado_permanente=usuario_con_rol.bloqueado_permanente,
         fecha_creacion=usuario_con_rol.fecha_creacion,
         fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
         fecha_eliminacion=usuario_con_rol.fecha_eliminacion,
@@ -244,6 +250,87 @@ async def toggle_activo_usuario(
         id_fondo=usuario_con_rol.id_fondo,
         nombre_fondo=usuario_con_rol.fondo.nombre if usuario_con_rol.fondo else None,
         activo=usuario_con_rol.activo,
+        intentos_fallidos=usuario_con_rol.intentos_fallidos or 0,
+        bloqueado_permanente=usuario_con_rol.bloqueado_permanente,
+        fecha_creacion=usuario_con_rol.fecha_creacion,
+        fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
+        fecha_eliminacion=usuario_con_rol.fecha_eliminacion,
+        nombre_rol=usuario_con_rol.rol.nombre_rol if usuario_con_rol.rol else None,
+        fondos_asignados=[],
+    )
+
+
+@router.patch("/{id_usuario}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password_usuario(
+    id_usuario: int,
+    payload: UserPasswordReset,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+):
+    """
+    Resetea la contraseña de cualquier usuario. Solo ADMIN_GLOBAL.
+    No requiere la contraseña actual. También resetea contadores de bloqueo.
+    """
+    result = await db.execute(
+        select(Usuario).where(Usuario.id_usuario == id_usuario)
+    )
+    usuario = result.scalar_one_or_none()
+    if usuario is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado.",
+        )
+
+    usuario.password_hash = hash_password(payload.nueva_password)
+    usuario.intentos_fallidos = 0
+    usuario.bloqueado_hasta = None
+    usuario.bloqueado_permanente = False
+    await registrar_auditoria(db, current_user, acciones.CAMBIO_CONTRASENA)
+    await db.commit()
+
+
+@router.patch("/{id_usuario}/desbloquear", response_model=UserRead)
+async def desbloquear_usuario(
+    id_usuario: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(ADMIN_GLOBAL)),
+):
+    """
+    Desbloquea un usuario bloqueado temporal o permanentemente.
+    Solo ADMIN_GLOBAL.
+    """
+    result = await db.execute(
+        select(Usuario).where(Usuario.id_usuario == id_usuario)
+    )
+    usuario = result.scalar_one_or_none()
+    if usuario is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado.",
+        )
+
+    usuario.intentos_fallidos = 0
+    usuario.bloqueado_hasta = None
+    usuario.bloqueado_permanente = False
+    await registrar_auditoria(db, current_user, acciones.ACTUALIZAR_USUARIO)
+    await db.commit()
+    await db.refresh(usuario)
+
+    result = await db.execute(
+        select(Usuario)
+        .options(selectinload(Usuario.rol), selectinload(Usuario.fondo))
+        .where(Usuario.id_usuario == id_usuario)
+    )
+    usuario_con_rol = result.scalar_one()
+    return UserRead(
+        id_usuario=usuario_con_rol.id_usuario,
+        nombre=usuario_con_rol.nombre,
+        email=usuario_con_rol.email,
+        id_fondo=usuario_con_rol.id_fondo,
+        nombre_fondo=usuario_con_rol.fondo.nombre if usuario_con_rol.fondo else None,
+        activo=usuario_con_rol.activo,
+        intentos_fallidos=usuario_con_rol.intentos_fallidos or 0,
+        bloqueado_permanente=usuario_con_rol.bloqueado_permanente,
         fecha_creacion=usuario_con_rol.fecha_creacion,
         fecha_actualizacion=usuario_con_rol.fecha_actualizacion,
         fecha_eliminacion=usuario_con_rol.fecha_eliminacion,
@@ -303,6 +390,8 @@ async def read_users_me(
         id_fondo=user.id_fondo,
         nombre_fondo=user.fondo.nombre if user.fondo else None,
         activo=user.activo,
+        intentos_fallidos=user.intentos_fallidos or 0,
+        bloqueado_permanente=user.bloqueado_permanente,
         fecha_creacion=user.fecha_creacion,
         fecha_actualizacion=user.fecha_actualizacion,
         fecha_eliminacion=user.fecha_eliminacion,

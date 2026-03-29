@@ -53,6 +53,8 @@ class UserUpdate(BaseModel):
 class UserRead(UserBase):
     id_usuario: int
     activo: bool = True
+    intentos_fallidos: int = 0
+    bloqueado_permanente: bool = False
     fecha_creacion: datetime | None = None
     fecha_actualizacion: datetime | None = None
     fecha_eliminacion: datetime | None = None
@@ -97,3 +99,7 @@ class UserPasswordChange(BaseModel):
         if not re.search(r"[^A-Za-z0-9]", v):
             raise ValueError("La contraseña debe contener al menos un carácter especial (@, #, $, etc.).")
         return v
+
+
+class UserPasswordReset(BaseModel):
+    nueva_password: str = Field(..., min_length=6)

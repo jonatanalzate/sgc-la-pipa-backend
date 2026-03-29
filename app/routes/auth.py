@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
@@ -13,12 +13,9 @@ from app.models.usuario import Usuario
 from app.schemas.auth import Token
 from app.settings import settings
 
-import time
-from collections import defaultdict
-
-_login_attempts: dict[str, list[float]] = defaultdict(list)
-_LOGIN_MAX = 5
-_LOGIN_WINDOW = 60  # segundos
+_MAX_INTENTOS_TEMPORALES = 3
+_BLOQUEO_MINUTOS = 15
+_MAX_INTENTOS_PERMANENTE = 6  # 3 intentos + desbloqueo + 3 intentos más
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -45,32 +42,85 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    # Rate limiting por email
-    key = form_data.username.lower()
-    now = time.time()
-    _login_attempts[key] = [t for t in _login_attempts[key] if now - t < _LOGIN_WINDOW]
-    if len(_login_attempts[key]) >= _LOGIN_MAX:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Demasiados intentos. Espera 1 minuto e intenta de nuevo.",
-        )
-    _login_attempts[key].append(now)
+    now = datetime.now(timezone.utc)
 
-    user = await authenticate_user(db, form_data.username, form_data.password)
-    if not user:
+    # Buscar usuario por email
+    result = await db.execute(
+        select(Usuario).where(Usuario.email == form_data.username.lower())
+    )
+    user: Usuario | None = result.scalar_one_or_none()
+
+    # Si el usuario existe, verificar bloqueos antes de validar password
+    if user is not None:
+        # Bloqueo permanente
+        if user.bloqueado_permanente:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cuenta bloqueada permanentemente. Contacta al administrador.",
+            )
+
+        # Bloqueo temporal activo
+        if user.bloqueado_hasta is not None and user.bloqueado_hasta > now:
+            minutos_restantes = int(
+                (user.bloqueado_hasta - now).total_seconds() / 60
+            ) + 1
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Cuenta bloqueada temporalmente. Intenta en {minutos_restantes} minuto(s).",
+            )
+
+        # Si el bloqueo temporal ya expiró, resetear contador
+        if user.bloqueado_hasta is not None and user.bloqueado_hasta <= now:
+            user.bloqueado_hasta = None
+            user.intentos_fallidos = 0
+
+    # Validar credenciales
+    user_autenticado = await authenticate_user(
+        db, form_data.username.lower(), form_data.password
+    )
+
+    if user_autenticado is None:
+        # Registrar intento fallido si el usuario existe
+        if user is not None and user.activo:
+            user.intentos_fallidos += 1
+
+            if user.intentos_fallidos >= _MAX_INTENTOS_PERMANENTE:
+                # Bloqueo permanente
+                user.bloqueado_permanente = True
+                user.bloqueado_hasta = None
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Cuenta bloqueada permanentemente por múltiples intentos fallidos. Contacta al administrador.",
+                )
+            if user.intentos_fallidos >= _MAX_INTENTOS_TEMPORALES:
+                # Bloqueo temporal
+                user.bloqueado_hasta = now + timedelta(minutes=_BLOQUEO_MINUTOS)
+                await db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Demasiados intentos fallidos. Cuenta bloqueada por {_BLOQUEO_MINUTOS} minutos.",
+                )
+
+            await db.commit()
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
+            detail="Email o contraseña incorrectos.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    await registrar_auditoria(db, user, LOGIN_EXITOSO)
+    # Login exitoso - resetear contadores
+    user_autenticado.intentos_fallidos = 0
+    user_autenticado.bloqueado_hasta = None
+
+    await registrar_auditoria(db, user_autenticado, LOGIN_EXITOSO)
     await db.commit()
 
     access_token_expires = timedelta(minutes=settings.access_token_expire_minutes)
     access_token = create_access_token(
-        subject=user.email,
-        id_fondo=user.id_fondo,
+        subject=user_autenticado.email,
+        id_fondo=user_autenticado.id_fondo,
         expires_delta=access_token_expires,
     )
     return {"access_token": access_token, "token_type": "bearer"}
