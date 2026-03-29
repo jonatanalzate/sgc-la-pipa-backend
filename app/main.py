@@ -5,6 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Depends, FastAPI
 
 import logging
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from app.core.limiter import limiter
 from app.core.scheduler import start_scheduler, shutdown_scheduler
 
 logger = logging.getLogger(__name__)
@@ -47,6 +51,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SGC La Pipa", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 import os
 
