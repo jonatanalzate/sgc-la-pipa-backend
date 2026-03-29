@@ -157,6 +157,7 @@ async def solicitar_reset_password(
     import os
     print(f"RESEND_KEY presente: {bool(settings.resend_api_key)}", flush=True)
     print(f"RESEND env directo: {bool(os.environ.get('RESEND_API_KEY'))}", flush=True)
+    print(f"TODAS LAS VARS: {[k for k in os.environ.keys() if 'RESEND' in k.upper() or 'FRONT' in k.upper()]}", flush=True)
     print(f"FRONTEND_URL: {settings.frontend_url}", flush=True)
     print(f"Enviando email a: {user.email}", flush=True)
     if settings.resend_api_key:
