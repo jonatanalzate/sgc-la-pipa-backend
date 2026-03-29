@@ -154,7 +154,10 @@ async def solicitar_reset_password(
     user.reset_token_expira = expira
     await db.commit()
 
+    import os
     print(f"RESEND_KEY presente: {bool(settings.resend_api_key)}", flush=True)
+    print(f"RESEND env directo: {bool(os.environ.get('RESEND_API_KEY'))}", flush=True)
+    print(f"FRONTEND_URL: {settings.frontend_url}", flush=True)
     print(f"Enviando email a: {user.email}", flush=True)
     if settings.resend_api_key:
         resend.api_key = settings.resend_api_key
