@@ -171,6 +171,43 @@ async def list_microcupos(
     return microcupos
 
 
+@router.get(
+    "/proximos-a-vencer",
+    response_model=list[MicrocupoRead],
+)
+async def microcupos_proximos_a_vencer(
+    db: AsyncSession = Depends(get_db),
+    current_user: Usuario = Depends(
+        require_roles(ADMIN_GLOBAL, ADMIN_FONDO, EJECUTIVO_COMERCIAL)
+    ),
+    tenant_ids: list[int] = Depends(get_tenant_ids),
+):
+    """
+    GET /microcupos/proximos-a-vencer
+    Retorna microcupos en estado APROBADO cuya fecha_vencimiento
+    esté entre ahora (UTC) y los próximos 7 días.
+    Respeta multi-tenancy igual que GET /microcupos/.
+    """
+    ahora = datetime.now(timezone.utc)
+    limite = ahora + timedelta(days=7)
+
+    query: Select[tuple] = (
+        select(Microcupo)
+        .join(Asociado, Microcupo.id_asociado == Asociado.id_asociado)
+        .where(
+            Microcupo.estado == MicrocupoEstado.APROBADO,
+            Microcupo.fecha_vencimiento >= ahora,
+            Microcupo.fecha_vencimiento <= limite,
+        )
+    )
+
+    if tenant_ids:
+        query = query.where(Asociado.id_fondo.in_(tenant_ids))
+
+    result = await db.execute(query)
+    return result.scalars().all()
+
+
 @router.get("/{id_microcupo}", response_model=MicrocupoRead)
 async def get_microcupo(
     id_microcupo: int,
@@ -376,4 +413,3 @@ async def update_microcupo(
     await db.commit()
     await db.refresh(microcupo)
     return microcupo
-
