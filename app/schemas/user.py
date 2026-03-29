@@ -1,6 +1,7 @@
+import re
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserBase(BaseModel):
@@ -14,7 +15,19 @@ class UserCreate(BaseModel):
 
     nombre: str = Field(..., min_length=1, max_length=150)
     email: EmailStr
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=8)
+
+    @field_validator("password")
+    @classmethod
+    def password_policy(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres.")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("La contraseña debe contener al menos una letra mayúscula.")
+        if not re.search(r"\d", v):
+            raise ValueError("La contraseña debe contener al menos un número.")
+        return v
+
     id_rol: int = Field(..., description="ID del rol del usuario.")
     id_fondo: int | None = Field(default=None, description="ID del fondo (None para Admin Global).")
     fondos_asignados: list[int] = Field(
@@ -68,4 +81,15 @@ class UserRead(UserBase):
 
 class UserPasswordChange(BaseModel):
     current_password: str
-    new_password: str
+    new_password: str = Field(..., min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def new_password_policy(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("La contraseña debe tener al menos 8 caracteres.")
+        if not re.search(r"[A-Z]", v):
+            raise ValueError("La contraseña debe contener al menos una letra mayúscula.")
+        if not re.search(r"\d", v):
+            raise ValueError("La contraseña debe contener al menos un número.")
+        return v

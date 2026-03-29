@@ -5,7 +5,6 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.limiter import limiter
 from app.core.auditoria import registrar_auditoria
 from app.core.acciones import LOGIN_EXITOSO
 from app.core.security import create_access_token, verify_password
@@ -14,6 +13,12 @@ from app.models.usuario import Usuario
 from app.schemas.auth import Token
 from app.settings import settings
 
+import time
+from collections import defaultdict
+
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+_LOGIN_MAX = 5
+_LOGIN_WINDOW = 60  # segundos
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -35,12 +40,22 @@ async def authenticate_user(
 
 
 @router.post("/login", response_model=Token)
-@limiter.limit("5/minute")
 async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
+    # Rate limiting por email
+    key = form_data.username.lower()
+    now = time.time()
+    _login_attempts[key] = [t for t in _login_attempts[key] if now - t < _LOGIN_WINDOW]
+    if len(_login_attempts[key]) >= _LOGIN_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Demasiados intentos. Espera 1 minuto e intenta de nuevo.",
+        )
+    _login_attempts[key].append(now)
+
     user = await authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
