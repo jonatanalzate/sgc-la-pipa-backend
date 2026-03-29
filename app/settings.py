@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     ips_rescate: str = ""  # IPs separadas por coma, nunca bloqueadas
     sysadmin_email: str | None = None
     sysadmin_password: str | None = None
+    resend_api_key: str | None = None
+    frontend_url: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(
         env_file=".env",

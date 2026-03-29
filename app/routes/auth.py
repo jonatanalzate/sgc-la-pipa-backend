@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+import resend
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -124,4 +126,109 @@ async def login(
         expires_delta=access_token_expires,
     )
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+@router.post("/solicitar-reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def solicitar_reset_password(
+    email: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Genera un token de reset y envía email via Resend.
+    Siempre retorna 204 aunque el email no exista (seguridad).
+    """
+    from datetime import datetime, timezone, timedelta
+
+    result = await db.execute(
+        select(Usuario).where(Usuario.email == email.lower())
+    )
+    user: Usuario | None = result.scalar_one_or_none()
+
+    if user is None or not user.activo:
+        return
+
+    token = str(uuid.uuid4())
+    expira = datetime.now(timezone.utc) + timedelta(hours=2)
+
+    user.reset_token = token
+    user.reset_token_expira = expira
+    await db.commit()
+
+    print(f"RESEND_KEY presente: {bool(settings.resend_api_key)}", flush=True)
+    print(f"Enviando email a: {user.email}", flush=True)
+    if settings.resend_api_key:
+        resend.api_key = settings.resend_api_key
+        reset_url = f"{settings.frontend_url}/reset-password?token={token}"
+        try:
+            params = {
+                "from": "onboarding@resend.dev",
+                "to": [user.email],
+                "subject": "Recuperación de contraseña - SGC La Pipa",
+                "html": f"""
+                <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+                    <h2 style="color: #085692;">SGC La Pipa</h2>
+                    <p>Hola <strong>{user.nombre}</strong>,</p>
+                    <p>Recibimos una solicitud para restablecer tu contraseña.</p>
+                    <p>
+                        <a href="{reset_url}"
+                           style="display:inline-block;background:#085692;color:white;
+                                  padding:10px 20px;border-radius:6px;text-decoration:none;
+                                  font-size:14px;">
+                            Restablecer contraseña
+                        </a>
+                    </p>
+                    <p style="color:#666;font-size:12px;">
+                        Este enlace expira en 2 horas.<br>
+                        Si no solicitaste esto, ignora este email.
+                    </p>
+                </div>
+                """,
+            }
+            resend.Emails.send(params)
+        except Exception as e:
+            print(f"ERROR RESEND: {e}", flush=True)
+
+
+@router.post("/confirmar-reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def confirmar_reset_password(
+    token: str,
+    nueva_password: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Valida el token y actualiza la contraseña.
+    """
+    from datetime import datetime, timezone
+    from app.core.security import hash_password
+
+    now = datetime.now(timezone.utc)
+
+    result = await db.execute(
+        select(Usuario).where(
+            Usuario.reset_token == token,
+            Usuario.reset_token_expira > now,
+            Usuario.activo.is_(True),
+        )
+    )
+    user: Usuario | None = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Token inválido o expirado.",
+        )
+
+    if len(nueva_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La contraseña debe tener al menos 6 caracteres.",
+        )
+
+    user.password_hash = hash_password(nueva_password)
+    user.reset_token = None
+    user.reset_token_expira = None
+    user.intentos_fallidos = 0
+    user.bloqueado_hasta = None
+    user.bloqueado_permanente = False
+    await db.commit()
 
