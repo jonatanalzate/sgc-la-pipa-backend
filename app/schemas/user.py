@@ -26,6 +26,8 @@ class UserCreate(BaseModel):
             raise ValueError("La contraseña debe contener al menos una letra mayúscula.")
         if not re.search(r"\d", v):
             raise ValueError("La contraseña debe contener al menos un número.")
+        if not re.search(r"[^A-Za-z0-9]", v):
+            raise ValueError("La contraseña debe contener al menos un carácter especial (@, #, $, etc.).")
         return v
 
     id_rol: int = Field(..., description="ID del rol del usuario.")
@@ -92,4 +94,6 @@ class UserPasswordChange(BaseModel):
             raise ValueError("La contraseña debe contener al menos una letra mayúscula.")
         if not re.search(r"\d", v):
             raise ValueError("La contraseña debe contener al menos un número.")
+        if not re.search(r"[^A-Za-z0-9]", v):
+            raise ValueError("La contraseña debe contener al menos un carácter especial (@, #, $, etc.).")
         return v
