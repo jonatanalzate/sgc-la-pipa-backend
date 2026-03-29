@@ -154,12 +154,6 @@ async def solicitar_reset_password(
     user.reset_token_expira = expira
     await db.commit()
 
-    import os
-    print(f"RESEND_KEY presente: {bool(settings.resend_api_key)}", flush=True)
-    print(f"RESEND env directo: {bool(os.environ.get('RESEND_API_KEY'))}", flush=True)
-    print(f"TODAS LAS VARS: {[k for k in os.environ.keys() if 'RESEND' in k.upper() or 'FRONT' in k.upper()]}", flush=True)
-    print(f"FRONTEND_URL: {settings.frontend_url}", flush=True)
-    print(f"Enviando email a: {user.email}", flush=True)
     if settings.resend_api_key:
         resend.api_key = settings.resend_api_key
         reset_url = f"{settings.frontend_url}/reset-password?token={token}"
@@ -189,8 +183,8 @@ async def solicitar_reset_password(
                 """,
             }
             resend.Emails.send(params)
-        except Exception as e:
-            print(f"ERROR RESEND: {e}", flush=True)
+        except Exception:
+            pass
 
 
 @router.post("/confirmar-reset-password", status_code=status.HTTP_204_NO_CONTENT)
