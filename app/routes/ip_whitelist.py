@@ -114,7 +114,6 @@ async def delete_ip_whitelist(
             detail="IP no encontrada en la whitelist.",
         )
 
-    direccion_ip = ip_entrada.direccion_ip
     try:
         await db.delete(ip_entrada)
         await registrar_auditoria(db, current_user, acciones.ELIMINAR_IP_WHITELIST)

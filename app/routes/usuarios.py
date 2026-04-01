@@ -409,7 +409,7 @@ async def change_password(
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Current password is incorrect",
+            detail="La contraseña actual es incorrecta.",
         )
 
     current_user.password_hash = hash_password(payload.new_password)

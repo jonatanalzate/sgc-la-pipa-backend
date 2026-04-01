@@ -12,5 +12,4 @@ pandas
 openpyxl
 alembic
 apscheduler==3.10.4
-slowapi==0.1.9
 resend

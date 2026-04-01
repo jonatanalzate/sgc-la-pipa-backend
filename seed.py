@@ -10,6 +10,9 @@ from app.models.rol import Rol
 from app.models.usuario import Usuario
 from app.settings import settings
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 async def seed() -> None:
     """
@@ -47,10 +50,7 @@ async def seed() -> None:
         sysadmin_password: Optional[str] = settings.sysadmin_password
 
         if not sysadmin_email or not sysadmin_password:
-            print(
-                "[seed] Advertencia: SYSADMIN_EMAIL o SYSADMIN_PASSWORD no están "
-                "definidas. No se creará el usuario Sysadmin."
-            )
+            logger.warning("[seed] Advertencia: SYSADMIN_EMAIL o SYSADMIN_PASSWORD no están definidas. No se creará el usuario Sysadmin.")
         else:
             result = await session.execute(
                 select(Usuario).where(Usuario.email == sysadmin_email)

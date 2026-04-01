@@ -69,7 +69,7 @@ async def update_punto(
     result = await db.execute(select(PuntoDeVenta).where(PuntoDeVenta.id_punto_venta == id_punto_venta))
     punto = result.scalar_one_or_none()
     if punto is None:
-        raise HTTPException(status_code=404, detail="Punto de venta no encontrado.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Punto de venta no encontrado.")
     punto.nombre = payload.nombre
     punto.direccion = payload.direccion
     punto.ciudad = payload.ciudad.strip()
@@ -87,7 +87,7 @@ async def toggle_activo(
     result = await db.execute(select(PuntoDeVenta).where(PuntoDeVenta.id_punto_venta == id_punto_venta))
     punto = result.scalar_one_or_none()
     if punto is None:
-        raise HTTPException(status_code=404, detail="Punto de venta no encontrado.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Punto de venta no encontrado.")
     punto.activo = not punto.activo
     await db.commit()
     await db.refresh(punto)
