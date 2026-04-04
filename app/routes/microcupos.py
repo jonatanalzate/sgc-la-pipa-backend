@@ -248,8 +248,8 @@ async def cancelar_microcupo(
 
     - ADMIN_FONDO y EJECUTIVO_COMERCIAL.
     - Solo se pueden cancelar microcupos en estado APROBADO.
-    - Devuelve el saldo al cupo general y cambia el estado del microcupo a DENEGADO.
-    - Registra auditoría MICROCUPO_DENEGADO.
+    - Devuelve el saldo al cupo general y cambia el estado del microcupo a CANCELADO.
+    - Registra auditoría MICROCUPO_CANCELADO.
     """
     try:
         query: Select[tuple] = (
@@ -285,10 +285,10 @@ async def cancelar_microcupo(
             )
 
         cupo.valor_disponible += microcupo.monto
-        microcupo.estado = MicrocupoEstado.DENEGADO
+        microcupo.estado = MicrocupoEstado.CANCELADO
         microcupo.id_fondo = id_fondo
 
-        await registrar_auditoria(db, current_user, acciones.MICROCUPO_DENEGADO)
+        await registrar_auditoria(db, current_user, acciones.MICROCUPO_CANCELADO)
         await db.commit()
     except HTTPException:
         await db.rollback()

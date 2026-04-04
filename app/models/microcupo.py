@@ -13,6 +13,7 @@ class MicrocupoEstado(str, PyEnum):
     CONSUMIDO = "CONSUMIDO"
     VENCIDO = "VENCIDO"
     DENEGADO = "DENEGADO"
+    CANCELADO = "CANCELADO"
 
 
 class ModalidadEntrega(str, PyEnum):
