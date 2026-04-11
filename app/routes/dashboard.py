@@ -177,8 +177,8 @@ async def get_fondo_stats(
         dinero_no_disponible = valor_total_consolidado - valor_disponible_consolidado
         porcentaje_ejecucion = dinero_no_disponible / valor_total_consolidado * 100
 
-        # % compromiso: ejecutado + reservado
-        porcentaje_compromiso = (monto_ejecutado + monto_reservado) / valor_total_consolidado * 100
+        # % compromiso: dinero no disponible (ejecutado neto) + reservado
+        porcentaje_compromiso = (dinero_no_disponible + monto_reservado) / valor_total_consolidado * 100
 
     # Microcupos vencidos y consumidos consolidados
     microcupos_estado_query: Select[tuple] = (
